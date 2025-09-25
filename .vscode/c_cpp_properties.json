@@ -1,0 +1,30 @@
+{
+    "configurations": [
+        {
+            "name": "Mac",
+            "includePath": [
+                // cuda
+                "/usr/local/cuda/include",
+                // TODO: find a way to make this relative
+                "${workspaceFolder}/**",
+                "~/miniforge3/include/python3.10/",
+                "~/miniforge3/lib/python3.10/site-packages/torch/include",
+                "~/miniforge3/lib/python3.10/site-packages/torch/include/torch/csrc/api/include",
+                "~/mambaforge/include/python3.10/",
+                "~/mambaforge/lib/python3.10/site-packages/torch/include",
+                "~/mambaforge/lib/python3.10/site-packages/torch/include/torch/csrc/api/include",
+                "~/base/pytorch/torch/include",
+                "~/base/pytorch/torch/include/torch/csrc/api/include",
+                "${workspaceFolder}/thirdparty/libcudss-linux-sbsa-0.2.1.3_cuda12-archive/include"
+            ],
+            "defines": [],
+            "macFrameworkPath": [
+                "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/System/Library/Frameworks"
+            ],
+            "compilerPath": "/usr/bin/gcc",
+            "cStandard": "c17",
+            "cppStandard": "c++17"
+        }
+    ],
+    "version": 4
+}

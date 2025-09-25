@@ -1,0 +1,9 @@
+tqdm
+notebook
+scipy
+torchdata==0.8.0
+portalocker>=2.0.0
+matplotlib
+pytest
+bs4
+warp-lang
