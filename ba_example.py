@@ -7,7 +7,7 @@ from datapipes.bal_loader import get_problem, read_bal_data
 from bae.sparse.py_ops import *
 from bae.sparse.solve import *
 from bae.optim import LM
-from bae.utils.pysolvers import PCG, cuSolverSP
+from bae.utils.pysolvers import PCG, CuDSS
 
 # TARGET_DATASET = "ladybug"
 # TARGET_PROBLEM = "problem-1723-156502-pre"
@@ -50,7 +50,7 @@ model = Reproj(
     trimmed_dataset['points_3d'].clone()
 ).to(DEVICE)
 strategy = pp.optim.strategy.TrustRegion(up=2.0, down=0.5**4)
-solver = PCG(tol=1e-4, maxiter=250)
+solver = PCG(tol=1e-4, maxiter=250)  # or CuDSS()
 optimizer = LM(model, strategy=strategy, solver=solver, reject=30)
 
 print('Loss:', least_square_error(

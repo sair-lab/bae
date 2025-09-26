@@ -4,7 +4,7 @@ from torch import Tensor
 from pypose.optim.solver import CG
 from bae.sparse.py_ops import spdiags_
 
-from bae.sparse.solve import CuDirectSparseSolver as cuSolverSP
+from bae.sparse.solve import CuDirectSparseSolver as CuDSS
 
 
 class PCG(CG):

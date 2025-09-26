@@ -24,18 +24,22 @@
 ### Setup Instructions
 
 1. (Optional) Install CUDSS (recommended through package manager)
-2. Clone this repository:
+2. Install PyPose from the bae branch:
    ```bash
-   git clone https://github.com/yourusername/bae.git
+   pip install git+https://github.com/pypose/pypose.git@bae
+   ```
+3. Clone this repository:
+   ```bash
+   git clone https://github.com/zitongzhan/bae.git
    cd bae
    ```
 
-3. Install dependencies:
+4. Install dependencies:
    ```bash
    pip install -r requirements.txt
    ```
 
-4. Install the package in development mode:
+5. Install the package in development mode:
    ```bash
    pip install -e .
    ```
