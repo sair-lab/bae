@@ -1,5 +1,6 @@
+from typing import Optional
 import torch
-
+from torch import Tensor
 from pypose.optim.solver import CG
 from bae.sparse.py_ops import spdiags_
 
@@ -117,8 +118,8 @@ class CG_(torch.nn.Module):
             None, None, None, None, None
         self.static_rho_prev, self.static_rho_cur = None, None
 
-    def forward(self, A: Tensor, b: Tensor, x: Optional[Tensor]=None,
-                M: Optional[Tensor]=None) -> Tensor:
+    def forward(self, A: torch.Tensor, b: Tensor, x: Optional[Tensor]=None,
+                M: Optional[torch.Tensor]=None) -> Tensor:
         '''
         Args:
             A (Tensor): the input tensor. It is assumed to be a symmetric
