@@ -57,7 +57,7 @@ class LM(ppLM):
     def step(self, input, target=None, weight=None):
         for pg in self.param_groups:
             weight = self.weight if weight is None else weight
-            R = list(self.model(input))
+            R = list(self.model(input, target))
             R = R[0]
             J = jacobian(R, pg['params'])
             if isinstance(R, TrackingTensor):
