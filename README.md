@@ -17,6 +17,9 @@
 - **PyTorch Integration**: Seamlessly integrates with PyTorch's automatic differentiation framework
 - **Levenberg-Marquardt Optimizer**: Custom implementation of the LM algorithm for non-linear least squares problems
 
+### Future Plan
+- [ ] An new backend for [distributed solver](https://github.com/NVIDIA/AMGX)  
+
 ## Installation
 
 ### Prerequisites

@@ -5,7 +5,6 @@ import pypose as pp
 from ba_helpers import Reproj, least_square_error
 from datapipes.bal_loader import get_problem, read_bal_data
 from bae.sparse.py_ops import *
-from bae.sparse.solve import *
 from bae.optim import LM
 from bae.utils.pysolvers import PCG, CuDSS
 

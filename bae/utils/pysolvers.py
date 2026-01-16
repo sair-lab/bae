@@ -4,7 +4,19 @@ from torch import Tensor
 from pypose.optim.solver import CG
 from bae.sparse.py_ops import spdiags_
 
-from bae.sparse.solve import CuDirectSparseSolver as CuDSS
+try:
+    from bae.sparse.solve import CuDirectSparseSolver as CuDSS
+except Exception as e:
+    _cudss_import_error = e
+
+    class CuDSS(torch.nn.Module):
+        def __init__(self, *args, **kwargs):
+            raise ImportError(
+                "CuDSS solver is unavailable because `bae.sparse.solve` failed to import. "
+                "This is commonly caused by a CUDA/cuDSS/cuBLAS mismatch (e.g. missing "
+                "`libcublas.so.13`). Use `PCG(...)` instead, or install a cuDSS build that "
+                "matches your CUDA toolkit."
+            ) from _cudss_import_error
 
 
 class PCG(CG):
