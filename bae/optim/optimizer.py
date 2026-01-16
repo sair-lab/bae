@@ -49,9 +49,10 @@ def jacobian(output, params):
 
 
 class LM(ppLM):
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, verbose=True, **kwargs):
         super(LM, self).__init__(*args, **kwargs)
         self.mm = CuSparse()
+        self.verbose = verbose
 
     @torch.no_grad()
     def step(self, input, target=None, weight=None):
@@ -83,7 +84,8 @@ class LM(ppLM):
                     break
                 self.update_parameter(pg['params'], D)
                 self.loss = self.model.loss(input, target)
-                print("Loss:", self.loss, "Last Loss:", self.last, "Reject Count:", self.reject_count, "Damping:", pg['damping'])
+                if self.verbose:
+                    print("Loss:", self.loss, "Last Loss:", self.last, "Reject Count:", self.reject_count, "Damping:", pg['damping'])
                 self.strategy.update(pg, last=self.last, loss=self.loss, J=J, D=D, R=R.view(-1, 1))
                 if self.last < self.loss and self.reject_count < self.reject:  # reject step
                     self.update_parameter(params=pg['params'], step=-D)
