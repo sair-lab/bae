@@ -71,3 +71,32 @@ def test_sparse_jacobian_matches_torch_jacrev(device: str):
 
     assert torch.equal(J_sparse[0].col_indices(), idx_a[sel])
     assert torch.equal(J_sparse[1].col_indices(), idx_b[sel])
+
+
+@pytest.mark.parametrize("device", ["cpu", "cuda"])
+def test_sparse_jacobian_last_op_indexing_is_identity(device: str):
+    if device == "cuda" and not torch.cuda.is_available():
+        pytest.skip("CUDA not available")
+
+    torch.manual_seed(0)
+    dtype = torch.float64
+
+    num_a = 6
+    n = 8
+    dim = 4
+
+    A0 = torch.randn(num_a, dim, device=device, dtype=dtype, requires_grad=True)
+    idx_a = torch.randint(0, num_a, (n,), device=device, dtype=torch.int32)
+
+    model = nn.Parameter(Track(A0))
+    out = model[idx_a]
+
+    (J_sparse,) = sparse_jacobian(out, [model])
+    assert J_sparse.layout == torch.sparse_bsr
+
+    def f(A: torch.Tensor) -> torch.Tensor:
+        return A[idx_a]
+
+    (JA,) = jacrev(f, argnums=(0,))(A0)
+    torch.testing.assert_close(J_sparse.to_dense(), _flatten_jac(JA), rtol=1e-10, atol=1e-10)
+    assert torch.equal(J_sparse.col_indices(), idx_a)

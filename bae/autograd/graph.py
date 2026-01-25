@@ -105,7 +105,18 @@ def backward(output_):
         index = output_.optrace[id(output_)][1]
         arg = output_.optrace[id(output_)][2]
 
-        # check if upstream index exists
+        # If the last operation is indexing, there is no downstream map op to
+        # populate Jacobian values. In this case, the Jacobian block values are
+        # identity matrices placed at the indexed columns.
+        if not hasattr(output_, 'jactrace'):
+            if output_.ndim == 1:
+                eye_blocks = torch.ones((output_.shape[0], 1, 1), device=output_.device, dtype=output_.dtype)
+            else:
+                block_dim = output_.shape[-1]
+                eye = torch.eye(block_dim, device=output_.device, dtype=output_.dtype)
+                eye_blocks = eye.unsqueeze(0).repeat(output_.shape[0], 1, 1)
+            output_.jactrace = (None, eye_blocks)
+
         if type(output_.jactrace) is tuple:
             if output_.jactrace[0] is not None:
                 upstream_index = output_.jactrace[0]
@@ -124,7 +135,7 @@ def backward(output_):
 
 
 def jacobian(output, params):
-    assert output.optrace[id(output)][0] == 'map', "The last operation in compute graph being indexing transform is not meaningful"
+    assert output.optrace[id(output)][0] in ('map', 'index'), "Unsupported last operation in compute graph"
     backward(output)
     res = []
     for param in params:
