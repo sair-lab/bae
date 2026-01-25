@@ -5,6 +5,82 @@ import torch
 from torch.func import jacrev
 
 
+def _crow_to_row_indices(crow_indices: torch.Tensor) -> torch.Tensor:
+    counts = (crow_indices[1:] - crow_indices[:-1]).to(torch.int64)
+    row_ids = torch.arange(counts.numel(), device=crow_indices.device, dtype=torch.int64)
+    return torch.repeat_interleave(row_ids, counts)
+
+
+def _row_indices_to_crow(row_indices: torch.Tensor, n_rows: int, dtype: torch.dtype) -> torch.Tensor:
+    if row_indices.numel() == 0:
+        return torch.zeros(n_rows + 1, device=row_indices.device, dtype=dtype)
+    counts = torch.bincount(row_indices.to(torch.int64), minlength=n_rows).to(dtype)
+    crow = torch.zeros(n_rows + 1, device=row_indices.device, dtype=dtype)
+    crow[1:] = torch.cumsum(counts, dim=0)
+    return crow
+
+
+def _slice_upstream_bsr_columns(
+    upstream: torch.Tensor,
+    col_start: int,
+    col_end: int,
+    out_cols_blocks: int,
+) -> torch.Tensor:
+    crow = upstream.crow_indices()
+    col = upstream.col_indices()
+    values = upstream.values()
+
+    n_rows_blocks = crow.numel() - 1
+    row_indices = _crow_to_row_indices(crow)
+    mask = (col >= col_start) & (col < col_end)
+
+    row_f = row_indices[mask]
+    col_f = (col[mask] - col_start).to(col.dtype)
+    val_f = values[mask]
+
+    crow_f = _row_indices_to_crow(row_f, n_rows_blocks, dtype=crow.dtype)
+    block_cols = values.shape[-1] if values.ndim > 1 else 1
+    new_size = (upstream.shape[0], out_cols_blocks * block_cols)
+    return torch.sparse_bsr_tensor(
+        crow_indices=crow_f,
+        col_indices=col_f,
+        values=val_f,
+        size=new_size,
+        device=upstream.device,
+        dtype=upstream.dtype,
+    )
+
+
+def _slice_upstream_tuple_columns(
+    indices: Optional[torch.Tensor],
+    values: torch.Tensor,
+    col_start: int,
+    col_end: int,
+    out_cols_blocks: int,
+) -> torch.Tensor:
+    n_rows_blocks = values.shape[0]
+    dm = values.shape[-2] if values.ndim > 1 else 1
+    dn = values.shape[-1] if values.ndim > 1 else 1
+
+    if indices is None:
+        indices = torch.arange(n_rows_blocks, device=values.device, dtype=torch.int32)
+
+    mask = (indices >= col_start) & (indices < col_end)
+    crow = torch.zeros(n_rows_blocks + 1, device=values.device, dtype=torch.int32)
+    crow[1:] = torch.cumsum(mask.to(crow.dtype), dim=0)
+    col_f = (indices[mask] - col_start).to(torch.int32)
+    val_f = values[mask]
+
+    return torch.sparse_bsr_tensor(
+        crow_indices=crow,
+        col_indices=col_f,
+        values=val_f,
+        size=(n_rows_blocks * dm, out_cols_blocks * dn),
+        device=values.device,
+        dtype=values.dtype,
+    )
+
+
 def construct_sbt(jac_from_vmap, num, index: Optional[torch.Tensor], type=torch.sparse_bsc):
     if index is None:
         index = torch.arange(num, device=jac_from_vmap.device, dtype=torch.int32)
@@ -83,17 +159,17 @@ def backward(output_):
                 if type(output_.jactrace) is tuple:
                     indices = output_.jactrace[0]
                     jac_ustrm = output_.jactrace[1]
-                elif type(output_.jactrace) is torch.Tensor and output_[jacidx].jactrace.layout == torch.sparse_bsr:
+                elif isinstance(output_.jactrace, torch.Tensor) and output_.jactrace.layout == torch.sparse_bsr:
                     indices = output_.jactrace.col_indices()
                     jac_ustrm = output_.jactrace.values()
 
                 if indices is not None:
                     jac_block = jac_block[indices]
                 jac_block = jac_ustrm @ jac_block
-                
+
                 if type(output_.jactrace) is tuple:
                     jac_trace = (indices, jac_block)
-                elif type(output_.jactrace) is torch.Tensor and output_.jactrace.layout == torch.sparse_bsr:
+                elif isinstance(output_.jactrace, torch.Tensor) and output_.jactrace.layout == torch.sparse_bsr:
                     jac_trace = update_from_trace(output_.jactrace, arg, new_val=jac_block)
             amend_trace(arg, jac_trace)
         for argidx in argnums:
@@ -133,9 +209,46 @@ def backward(output_):
         if isinstance(arg, torch.Tensor) and hasattr(arg, 'optrace'):
             backward(arg)
 
+    elif output_.optrace[id(output_)][0] == 'cat':
+        dim = output_.optrace[id(output_)][1]
+        args = output_.optrace[id(output_)][2]
+        if dim != 0:
+            raise NotImplementedError("Only torch.cat(..., dim=0) is supported")
+
+        if not hasattr(output_, 'jactrace'):
+            if output_.ndim == 1:
+                eye_blocks = torch.ones((output_.shape[0], 1, 1), device=output_.device, dtype=output_.dtype)
+            else:
+                block_dim = output_.shape[-1]
+                eye = torch.eye(block_dim, device=output_.device, dtype=output_.dtype)
+                eye_blocks = eye.unsqueeze(0).repeat(output_.shape[0], 1, 1)
+            output_.jactrace = (None, eye_blocks)
+
+        upstream = output_.jactrace
+        offset = 0
+        for arg in args:
+            n = arg.shape[0]
+            start, end = offset, offset + n
+
+            if type(upstream) is tuple:
+                jac_trace = _slice_upstream_tuple_columns(
+                    upstream[0], upstream[1], start, end, out_cols_blocks=n
+                )
+            elif isinstance(upstream, torch.Tensor) and upstream.layout == torch.sparse_bsr:
+                jac_trace = _slice_upstream_bsr_columns(
+                    upstream, start, end, out_cols_blocks=n
+                )
+            else:
+                raise TypeError(f"Unsupported upstream jactrace type: {type(upstream)}")
+
+            amend_trace(arg, jac_trace)
+            if isinstance(arg, torch.Tensor) and hasattr(arg, 'optrace'):
+                backward(arg)
+            offset = end
+
 
 def jacobian(output, params):
-    assert output.optrace[id(output)][0] in ('map', 'index'), "Unsupported last operation in compute graph"
+    assert output.optrace[id(output)][0] in ('map', 'index', 'cat'), "Unsupported last operation in compute graph"
     backward(output)
     res = []
     for param in params:

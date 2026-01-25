@@ -100,3 +100,64 @@ def test_sparse_jacobian_last_op_indexing_is_identity(device: str):
     (JA,) = jacrev(f, argnums=(0,))(A0)
     torch.testing.assert_close(J_sparse.to_dense(), _flatten_jac(JA), rtol=1e-10, atol=1e-10)
     assert torch.equal(J_sparse.col_indices(), idx_a)
+
+
+class CatResidual(nn.Module):
+    def __init__(self, A: torch.Tensor, B: torch.Tensor):
+        super().__init__()
+        self.A = nn.Parameter(Track(A))
+        self.B = nn.Parameter(Track(B))
+
+    def forward(
+        self,
+        obs_a: torch.Tensor,
+        obs_b: torch.Tensor,
+        idx_a: torch.Tensor,
+        idx_b: torch.Tensor,
+    ) -> torch.Tensor:
+        ra = self.A[idx_a] - obs_a
+        rb = self.B[idx_b] - obs_b
+        return torch.cat([ra, rb], dim=0)
+
+
+@pytest.mark.parametrize("device", ["cpu", "cuda"])
+def test_sparse_jacobian_cat_dim0_matches_torch_jacrev(device: str):
+    if device == "cuda" and not torch.cuda.is_available():
+        pytest.skip("CUDA not available")
+
+    torch.manual_seed(0)
+    dtype = torch.float64
+
+    num_a, num_b = 5, 7
+    n_a, n_b = 4, 6
+    dim = 3
+
+    A0 = torch.randn(num_a, dim, device=device, dtype=dtype)
+    B0 = torch.randn(num_b, dim, device=device, dtype=dtype)
+    obs_a = torch.randn(n_a, dim, device=device, dtype=dtype)
+    obs_b = torch.randn(n_b, dim, device=device, dtype=dtype)
+
+    idx_a = torch.randint(0, num_a, (n_a,), device=device, dtype=torch.int32)
+    idx_b = torch.randint(0, num_b, (n_b,), device=device, dtype=torch.int32)
+
+    model = CatResidual(A0, B0)
+    out = model(obs_a, obs_b, idx_a, idx_b)
+
+    JA_sparse, JB_sparse = sparse_jacobian(out, [model.A, model.B])
+
+    def f(A: torch.Tensor, B: torch.Tensor) -> torch.Tensor:
+        ra = A[idx_a] - obs_a
+        rb = B[idx_b] - obs_b
+        return torch.cat([ra, rb], dim=0)
+
+    JA, JB = jacrev(f, argnums=(0, 1))(A0, B0)
+    torch.testing.assert_close(JA_sparse.to_dense(), _flatten_jac(JA), rtol=1e-10, atol=1e-10)
+    torch.testing.assert_close(JB_sparse.to_dense(), _flatten_jac(JB), rtol=1e-10, atol=1e-10)
+
+    assert JA_sparse.crow_indices()[n_a].item() == n_a
+    assert JA_sparse.crow_indices()[-1].item() == n_a
+    assert torch.equal(JA_sparse.col_indices(), idx_a)
+
+    assert JB_sparse.crow_indices()[n_a].item() == 0
+    assert JB_sparse.crow_indices()[-1].item() == n_b
+    assert torch.equal(JB_sparse.col_indices(), idx_b)
