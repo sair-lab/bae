@@ -36,6 +36,21 @@ class TrackingTensor(torch.Tensor):
                     result.optrace = {}
                 index_edge = ("index", args[1], args[0])
                 result.optrace[id(result)] = index_edge
+            elif func in (torch.cat, torch.concat):
+                if kwargs is None:
+                    kwargs = {}
+                dim = kwargs.get("dim", args[1] if len(args) > 1 else 0)
+                if dim != 0:
+                    raise NotImplementedError("Only torch.cat(..., dim=0) is supported as an indexing transform")
+
+                tensors = args[0]
+                merged_optrace = {}
+                for tensor in tensors:
+                    if isinstance(tensor, torch.Tensor) and hasattr(tensor, 'optrace'):
+                        merged_optrace.update(tensor.optrace)
+
+                merged_optrace[id(result)] = ("index_cat", dim, tuple(tensors))
+                result.optrace = merged_optrace
             elif func in WHITELISTED_MAPS:
                 merged_optrace = {}
                 for arg in args:
