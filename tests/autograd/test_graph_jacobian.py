@@ -114,9 +114,11 @@ class CatResidual(nn.Module):
         obs_b: torch.Tensor,
         idx_a: torch.Tensor,
         idx_b: torch.Tensor,
+        mul_a: torch.Tensor,
+        mul_b: torch.Tensor,
     ) -> torch.Tensor:
-        ra = self.A[idx_a] - obs_a
-        rb = self.B[idx_b] - obs_b
+        ra = (self.A[idx_a] - obs_a) * mul_a
+        rb = (self.B[idx_b] - obs_b) * mul_b
         return torch.cat([ra, rb], dim=0)
 
 
@@ -140,14 +142,17 @@ def test_sparse_jacobian_cat_dim0_matches_torch_jacrev(device: str):
     idx_a = torch.randint(0, num_a, (n_a,), device=device, dtype=torch.int32)
     idx_b = torch.randint(0, num_b, (n_b,), device=device, dtype=torch.int32)
 
+    mul_a = torch.rand(n_a, dim, device=device, dtype=dtype) + 0.5
+    mul_b = torch.rand(n_b, dim, device=device, dtype=dtype) + 0.5
+
     model = CatResidual(A0, B0)
-    out = model(obs_a, obs_b, idx_a, idx_b)
+    out = model(obs_a, obs_b, idx_a, idx_b, mul_a, mul_b)
 
     JA_sparse, JB_sparse = sparse_jacobian(out, [model.A, model.B])
 
     def f(A: torch.Tensor, B: torch.Tensor) -> torch.Tensor:
-        ra = A[idx_a] - obs_a
-        rb = B[idx_b] - obs_b
+        ra = (A[idx_a] - obs_a) * mul_a
+        rb = (B[idx_b] - obs_b) * mul_b
         return torch.cat([ra, rb], dim=0)
 
     JA, JB = jacrev(f, argnums=(0, 1))(A0, B0)
@@ -175,8 +180,10 @@ class CatSubResidual(nn.Module):
         obs_b: torch.Tensor,
         idx_a: torch.Tensor,
         idx_b: torch.Tensor,
+        mul_a: torch.Tensor,
+        mul_b: torch.Tensor,
     ) -> torch.Tensor:
-        pred = torch.cat([self.A[idx_a], self.B[idx_b]], dim=0)
+        pred = torch.cat([self.A[idx_a] * mul_a, self.B[idx_b] * mul_b], dim=0)
         obs = torch.cat([obs_a, obs_b], dim=0)
         return pred - obs
 
@@ -201,13 +208,16 @@ def test_sparse_jacobian_cat_minus_cat_matches_torch_jacrev(device: str):
     idx_a = torch.randint(0, num_a, (n_a,), device=device, dtype=torch.int32)
     idx_b = torch.randint(0, num_b, (n_b,), device=device, dtype=torch.int32)
 
+    mul_a = torch.rand(n_a, dim, device=device, dtype=dtype) + 0.5
+    mul_b = torch.rand(n_b, dim, device=device, dtype=dtype) + 0.5
+
     model = CatSubResidual(A0, B0)
-    out = model(obs_a, obs_b, idx_a, idx_b)
+    out = model(obs_a, obs_b, idx_a, idx_b, mul_a, mul_b)
 
     JA_sparse, JB_sparse = sparse_jacobian(out, [model.A, model.B])
 
     def f(A: torch.Tensor, B: torch.Tensor) -> torch.Tensor:
-        pred = torch.cat([A[idx_a], B[idx_b]], dim=0)
+        pred = torch.cat([A[idx_a] * mul_a, B[idx_b] * mul_b], dim=0)
         obs = torch.cat([obs_a, obs_b], dim=0)
         return pred - obs
 
