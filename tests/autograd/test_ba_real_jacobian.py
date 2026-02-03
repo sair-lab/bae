@@ -1,8 +1,13 @@
 from __future__ import annotations
 
 from pathlib import Path
+import bz2
 import os
+import shutil
 import sys
+import urllib.error
+import urllib.request
+from urllib.parse import urljoin
 
 import pytest
 import torch
@@ -22,15 +27,104 @@ pytestmark = [
 ]
 
 _BAL_DATA_DIR = _REPO_ROOT / "bal_data"
-_BAL_PROBLEM_FILES = sorted(_BAL_DATA_DIR.glob("problem-*-pre.txt"))
-if not _BAL_PROBLEM_FILES:
-    _BAL_PROBLEM_FILES = [_BAL_DATA_DIR / "problem-257-65132-pre.txt"]
+_BAL_DATA_URL = "https://grail.cs.washington.edu/projects/bal/"
+_BAL_SAMPLES: list[tuple[str, str]] = [
+    ("trafalgar", "problem-257-65132-pre"),
+    ("dubrovnik", "problem-356-226730-pre"),
+    ("ladybug", "problem-1723-156502-pre"),
+]
 
 
-def _load_bal_problem(path: Path) -> dict:
-    # Keep this fully offline for CI (no torchdata/HttpReader).
-    if not path.exists():
-        pytest.skip(f"Missing BAL sample file: {path}")
+def _candidate_bal_urls(dataset: str, bz2_name: str) -> list[str]:
+    base = _BAL_DATA_URL if _BAL_DATA_URL.endswith("/") else (_BAL_DATA_URL + "/")
+    prefixes = [
+        f"data/{dataset}/",  # matches BAL html link format
+        f"{dataset}/",
+        f"bal/data/{dataset}/",
+        "data/",
+        "bal/data/",
+        "",
+    ]
+    urls: list[str] = []
+    seen: set[str] = set()
+    for prefix in prefixes:
+        url = urljoin(base, prefix + bz2_name)
+        if url not in seen:
+            seen.add(url)
+            urls.append(url)
+    return urls
+
+
+def _download_url(url: str, dst_path: Path, *, timeout_s: float = 60.0) -> None:
+    dst_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = dst_path.with_suffix(dst_path.suffix + ".tmp")
+    req = urllib.request.Request(url, headers={"User-Agent": "bae-pytest/1.0"})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout_s) as resp, tmp_path.open("wb") as f:
+            shutil.copyfileobj(resp, f)
+    except Exception:
+        try:
+            tmp_path.unlink(missing_ok=True)
+        except Exception:
+            pass
+        raise
+    os.replace(tmp_path, dst_path)
+
+
+def _ensure_bal_problem_downloaded(dataset: str, problem_name: str, cache_dir: Path) -> Path:
+    problem_name = problem_name.removesuffix(".txt").removesuffix(".bz2").removesuffix(".txt")
+    txt_path = cache_dir / f"{problem_name}.txt"
+    bz2_path = cache_dir / f"{problem_name}.txt.bz2"
+
+    if txt_path.exists() and txt_path.stat().st_size > 0:
+        return txt_path
+
+    if not bz2_path.exists() or bz2_path.stat().st_size == 0:
+        bz2_name = bz2_path.name
+        last_err: BaseException | None = None
+        for url in _candidate_bal_urls(dataset, bz2_name):
+            try:
+                _download_url(url, bz2_path)
+                last_err = None
+                break
+            except urllib.error.URLError as e:
+                last_err = e
+        if last_err is not None:
+            raise last_err
+
+    tmp_txt = txt_path.with_suffix(".txt.tmp")
+    try:
+        with bz2.open(bz2_path, "rb") as src, tmp_txt.open("wb") as dst:
+            shutil.copyfileobj(src, dst)
+    except Exception:
+        try:
+            tmp_txt.unlink(missing_ok=True)
+        except Exception:
+            pass
+        raise
+    os.replace(tmp_txt, txt_path)
+    return txt_path
+
+
+@pytest.fixture(scope="session")
+def bal_cache_dir(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    override = os.environ.get("BAE_BAL_CACHE_DIR")
+    if override:
+        return Path(override).expanduser().resolve()
+
+    # Prefer the repository's `bal_data/` if it already contains the samples
+    # (keeps local development fully offline).
+    if _BAL_DATA_DIR.exists() and all((_BAL_DATA_DIR / f"{name}.txt").exists() for _, name in _BAL_SAMPLES):
+        return _BAL_DATA_DIR
+
+    return Path(tmp_path_factory.mktemp("bal_data"))
+
+
+def _load_bal_problem(dataset: str, problem_name: str, cache_dir: Path) -> dict:
+    try:
+        path = _ensure_bal_problem_downloaded(dataset, problem_name, cache_dir)
+    except Exception as e:
+        pytest.skip(f"Could not download BAL sample {dataset}/{problem_name}: {e!r}")
     return read_bal_data(str(path), use_quat=True)
 
 
@@ -45,12 +139,16 @@ def _jtj_diag_from_bsr(J: torch.Tensor) -> torch.Tensor:
 
 
 @pytest.mark.parametrize(
-    "problem_path",
-    _BAL_PROBLEM_FILES,
-    ids=[p.name for p in _BAL_PROBLEM_FILES],
+    ("dataset", "problem_name"),
+    _BAL_SAMPLES,
+    ids=[f"{ds}.{name}" for ds, name in _BAL_SAMPLES],
 )
-def test_bal_jacobian_structure_no_empty_columns(problem_path: Path, monkeypatch: pytest.MonkeyPatch):
-    data = _load_bal_problem(problem_path)
+def test_bal_jacobian_structure_no_empty_columns(
+    dataset: str,
+    problem_name: str,
+    bal_cache_dir: Path,
+):
+    data = _load_bal_problem(dataset, problem_name, bal_cache_dir)
 
     # CPU-only: CI doesn't have CUDA.
     device = torch.device("cpu")
