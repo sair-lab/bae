@@ -36,4 +36,4 @@ jobs:
           PYTHONPATH: /tmp/pydeps:${{ github.workspace }}
         run: |
           python -c "import torch; print('torch', torch.__version__)"
-          python -m pytest -q tests/autograd/test_graph_jacobian.py
+          python -m pytest -q tests/autograd
