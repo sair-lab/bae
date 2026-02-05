@@ -121,6 +121,13 @@ def bal_cache_dir(tmp_path_factory: pytest.TempPathFactory) -> Path:
 
 
 def _load_bal_problem(dataset: str, problem_name: str, cache_dir: Path) -> dict:
+    # Allow fully-offline runs when *some* BAL samples are already present in the
+    # repository's `bal_data/`, even if others are missing.
+    normalized = problem_name.removesuffix(".txt").removesuffix(".bz2").removesuffix(".txt")
+    local_txt = _BAL_DATA_DIR / f"{normalized}.txt"
+    if local_txt.exists() and local_txt.stat().st_size > 0:
+        return read_bal_data(str(local_txt), use_quat=True)
+
     try:
         path = _ensure_bal_problem_downloaded(dataset, problem_name, cache_dir)
     except Exception as e:
@@ -136,6 +143,64 @@ def _jtj_diag_from_bsr(J: torch.Tensor) -> torch.Tensor:
     diag_blocks = torch.zeros((num_blocks, values.shape[-1]), dtype=values.dtype, device=values.device)
     diag_blocks.index_add_(0, col_blocks, contrib)
     return diag_blocks.flatten()
+
+
+def _assert_bal_correctness_criteria(
+    J_cam: torch.Tensor,
+    J_pts: torch.Tensor,
+    *,
+    camera_idx: torch.Tensor,
+    point_idx: torch.Tensor,
+    n_cams: int,
+    n_pts: int,
+) -> None:
+    # Correctness criterion 1: no empty block-columns in each BSR Jacobian.
+    assert torch.equal(J_cam.col_indices(), camera_idx)
+    assert torch.equal(J_pts.col_indices(), point_idx)
+    assert torch.unique(J_cam.col_indices()).numel() == n_cams
+    assert torch.unique(J_pts.col_indices()).numel() == n_pts
+
+    # Correctness criterion 2: after concatenation, diag(J^T J) is fully occupied.
+    diag = torch.cat([_jtj_diag_from_bsr(J_cam), _jtj_diag_from_bsr(J_pts)], dim=0)
+    assert (diag > 0).all()
+
+
+def _remove_camera_and_or_point_appearance(
+    camera_idx: torch.Tensor,
+    point_idx: torch.Tensor,
+    *,
+    n_cams: int,
+    n_pts: int,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    # Mutate observation index arrays so at least one camera and/or point ID
+    # disappears entirely from observations, creating empty block-columns.
+    remove_camera = bool(torch.randint(0, 2, (1,)).item())
+    remove_point = bool(torch.randint(0, 2, (1,)).item())
+    if not remove_camera and not remove_point:
+        remove_camera = True
+
+    camera_idx2 = camera_idx.clone()
+    point_idx2 = point_idx.clone()
+
+    if remove_camera:
+        if n_cams < 2:
+            pytest.skip("BAL sample has <2 cameras; cannot construct removal case.")
+        cam_remove = int(torch.randint(0, n_cams, (1,)).item())
+        cam_offset = int(torch.randint(1, n_cams, (1,)).item())
+        cam_repl = (cam_remove + cam_offset) % n_cams
+        camera_idx2[camera_idx2 == cam_remove] = cam_repl
+        assert (camera_idx2 == cam_remove).sum().item() == 0
+
+    if remove_point:
+        if n_pts < 2:
+            pytest.skip("BAL sample has <2 points; cannot construct removal case.")
+        pt_remove = int(torch.randint(0, n_pts, (1,)).item())
+        pt_offset = int(torch.randint(1, n_pts, (1,)).item())
+        pt_repl = (pt_remove + pt_offset) % n_pts
+        point_idx2[point_idx2 == pt_remove] = pt_repl
+        assert (point_idx2 == pt_remove).sum().item() == 0
+
+    return camera_idx2, point_idx2
 
 
 @pytest.mark.parametrize(
@@ -176,12 +241,57 @@ def test_bal_jacobian_structure_no_empty_columns(
     n_cams = model.pose.shape[0]
     n_pts = model.points_3d.shape[0]
 
-    # Correctness criterion 1: no empty block-columns in each BSR Jacobian.
-    assert torch.equal(J_cam.col_indices(), camera_idx)
-    assert torch.equal(J_pts.col_indices(), point_idx)
-    assert torch.unique(J_cam.col_indices()).numel() == n_cams
-    assert torch.unique(J_pts.col_indices()).numel() == n_pts
+    _assert_bal_correctness_criteria(
+        J_cam,
+        J_pts,
+        camera_idx=camera_idx,
+        point_idx=point_idx,
+        n_cams=n_cams,
+        n_pts=n_pts,
+    )
 
-    # Correctness criterion 2: after concatenation, diag(J^T J) is fully occupied.
-    diag = torch.cat([_jtj_diag_from_bsr(J_cam), _jtj_diag_from_bsr(J_pts)], dim=0)
-    assert (diag > 0).all()
+
+@pytest.mark.parametrize(
+    ("dataset", "problem_name"),
+    _BAL_SAMPLES,
+    ids=[f"{ds}.{name}" for ds, name in _BAL_SAMPLES],
+)
+def test_bal_jacobian_structure_assert_failed_when_missing_observation_appearance(
+    dataset: str,
+    problem_name: str,
+    bal_cache_dir: Path,
+):
+    data = _load_bal_problem(dataset, problem_name, bal_cache_dir)
+
+    device = torch.device("cpu")
+    dtype = torch.float64
+
+    camera_params = data["camera_params"].to(device=device, dtype=dtype)
+    points_3d = data["points_3d"].to(device=device, dtype=dtype)
+    points_2d = data["points_2d"].to(device=device, dtype=dtype)
+    camera_idx = data["camera_index_of_observations"].to(torch.int32).to(device=device)
+    point_idx = data["point_index_of_observations"].to(torch.int32).to(device=device)
+
+    n_cams = int(camera_params.shape[0])
+    n_pts = int(points_3d.shape[0])
+
+    camera_idx2, point_idx2 = _remove_camera_and_or_point_appearance(
+        camera_idx,
+        point_idx,
+        n_cams=n_cams,
+        n_pts=n_pts,
+    )
+
+    model = Reproj(camera_params.clone(), points_3d.clone()).to(device)
+    residual = model(points_2d, camera_idx2, point_idx2)
+    J_cam, J_pts = autograd_graph.jacobian(residual, [model.pose, model.points_3d])
+
+    with pytest.raises(AssertionError):
+        _assert_bal_correctness_criteria(
+            J_cam,
+            J_pts,
+            camera_idx=camera_idx2,
+            point_idx=point_idx2,
+            n_cams=n_cams,
+            n_pts=n_pts,
+        )
