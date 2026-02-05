@@ -64,11 +64,13 @@ def _slice_upstream_tuple_columns(
 
     if indices is None:
         indices = torch.arange(n_rows_blocks, device=values.device, dtype=torch.int32)
+    elif indices.device != values.device:
+        indices = indices.to(device=values.device)
 
     mask = (indices >= col_start) & (indices < col_end)
     crow = torch.zeros(n_rows_blocks + 1, device=values.device, dtype=torch.int32)
     crow[1:] = torch.cumsum(mask.to(crow.dtype), dim=0)
-    col_f = (indices[mask] - col_start).to(torch.int32)
+    col_f = (indices[mask] - col_start).to(device=values.device, dtype=torch.int32)
     val_f = values[mask]
 
     return torch.sparse_bsr_tensor(

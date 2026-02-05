@@ -11,12 +11,15 @@ from urllib.parse import urljoin
 
 import pytest
 import torch
+import torch.nn as nn
+import pypose as pp
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from ba_helpers import Reproj  # noqa: E402
+from ba_helpers import Reproj, project  # noqa: E402
+from bae.autograd.function import TrackingTensor, map_transform
 import bae.autograd.graph as autograd_graph  # noqa: E402
 from datapipes.bal_io import read_bal_data  # noqa: E402
 
@@ -145,6 +148,17 @@ def _jtj_diag_from_bsr(J: torch.Tensor) -> torch.Tensor:
     return diag_blocks.flatten()
 
 
+def _assert_coo_no_empty_columns(J: torch.Tensor) -> None:
+    assert J.layout == torch.sparse_coo
+    J = J.coalesce()
+    n_cols = int(J.shape[1])
+    if n_cols == 0:
+        return
+    cols = J.indices()[1].to(torch.int64)
+    counts = torch.bincount(cols, minlength=n_cols)
+    assert (counts > 0).all()
+
+
 def _assert_bal_correctness_criteria(
     J_cam: torch.Tensor,
     J_pts: torch.Tensor,
@@ -233,6 +247,7 @@ def test_bal_jacobian_structure_no_empty_columns(
 
     model = Reproj(camera_params.clone(), points_3d.clone()).to(device)
     residual = model(points_2d, camera_idx, point_idx)
+    n_obs = int(points_2d.shape[0])
 
     J_cam, J_pts = autograd_graph.jacobian(residual, [model.pose, model.points_3d])
     assert J_cam.layout == torch.sparse_bsr
@@ -240,6 +255,9 @@ def test_bal_jacobian_structure_no_empty_columns(
 
     n_cams = model.pose.shape[0]
     n_pts = model.points_3d.shape[0]
+
+    assert J_cam.shape == (n_obs * 2, n_cams * 9)
+    assert J_pts.shape == (n_obs * 2, n_pts * 3)
 
     _assert_bal_correctness_criteria(
         J_cam,
@@ -249,6 +267,92 @@ def test_bal_jacobian_structure_no_empty_columns(
         n_cams=n_cams,
         n_pts=n_pts,
     )
+
+    J_full = torch.cat([t.to_sparse_coo() for t in (J_cam, J_pts)], dim=-1)
+    _assert_coo_no_empty_columns(J_full)
+
+
+
+@map_transform
+def transform_points(points, se3_params):
+    return pp.SE3(se3_params).Act(points)
+
+
+class ReprojCat(nn.Module):
+    def __init__(self, camera_params, points_b, points_c, se3_c):
+        super().__init__()
+        self.pose = nn.Parameter(TrackingTensor(camera_params))
+        self.points_b = nn.Parameter(TrackingTensor(points_b))
+        self.points_c = nn.Parameter(TrackingTensor(points_c))
+        self.se3_c = nn.Parameter(TrackingTensor(se3_c))
+        self.pose.trim_SE3_grad = True
+        self.se3_c.trim_SE3_grad = True
+
+    def forward(self, points_2d, camera_indices, point_indices):
+        points_c = transform_points(self.points_c, self.se3_c)
+        points_all = torch.cat([self.points_b, points_c], dim=0)
+        points_proj = project(points_all[point_indices], self.pose[camera_indices])
+        return points_proj - points_2d
+
+
+@pytest.mark.parametrize(
+    ("dataset", "problem_name"),
+    _BAL_SAMPLES,
+    ids=[f"{ds}.{name}" for ds, name in _BAL_SAMPLES],
+)
+def test_bal_jacobian_cat_split_points_no_empty_columns(
+    dataset: str,
+    problem_name: str,
+    bal_cache_dir: Path,
+):
+    data = _load_bal_problem(dataset, problem_name, bal_cache_dir)
+
+    device = torch.device("cpu")
+    dtype = torch.float64
+
+    camera_params = data["camera_params"].to(device=device, dtype=dtype)
+    points_3d = data["points_3d"].to(device=device, dtype=dtype)
+    points_2d = data["points_2d"].to(device=device, dtype=dtype)
+    camera_idx = data["camera_index_of_observations"].to(torch.int32).to(device=device)
+    point_idx = data["point_index_of_observations"].to(torch.int32).to(device=device)
+
+    n_pts = int(points_3d.shape[0])
+    split = max(1, n_pts // 2)
+    if split >= n_pts:
+        pytest.skip("BAL sample has <2 points; cannot construct cat split case.")
+
+    points_b = points_3d[:split].clone()
+    points_c = points_3d[split:].clone()
+
+    torch.manual_seed(0)
+    se3_c = pp.randn_SE3(points_c.shape[0], device=device, dtype=dtype).tensor()
+
+    model = ReprojCat(camera_params.clone(), points_b, points_c, se3_c).to(device)
+    residual = model(points_2d, camera_idx, point_idx)
+    n_obs = int(points_2d.shape[0])
+
+    J_cam, J_b, J_c, J_se3 = autograd_graph.jacobian(
+        residual,
+        [model.pose, model.points_b, model.points_c, model.se3_c],
+    )
+
+    n_cams = model.pose.shape[0]
+    n_b = model.points_b.shape[0]
+    n_c = model.points_c.shape[0]
+
+    assert J_cam.shape == (n_obs * 2, n_cams * 9)
+    assert J_b.shape == (n_obs * 2, n_b * 3)
+    assert J_c.shape == (n_obs * 2, n_c * 3)
+    assert J_se3.shape == (n_obs * 2, n_c * 6)
+
+    J_full = torch.cat(
+        [t.to_sparse_coo() for t in (J_cam, J_b, J_c, J_se3)],
+        dim=-1,
+    ).coalesce()
+    _assert_coo_no_empty_columns(J_full)
+    diag = torch.zeros(J_full.shape[1], dtype=J_full.dtype, device=J_full.device)
+    diag.scatter_add_(0, J_full.indices()[1].to(torch.int64), J_full.values().square())
+    assert (diag > 0).all()
 
 
 @pytest.mark.parametrize(
