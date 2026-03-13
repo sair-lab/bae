@@ -1,11 +1,5 @@
-try:
-    from .bsr import *
-except ImportError:
-    pass
-try:
-    from .bsr_cuda import *
-except ImportError:
-    pass
+from .bsr import *
+from .bsr_cuda import *
 from .py_ops import *
 try:
     from .solve import *
@@ -15,11 +9,5 @@ except ImportError:
     # this package fail even if you don't use the direct solver. Keep the rest of
     # the sparse ops usable and let callers opt into `bae.sparse.solve` explicitly.
     pass
-try:
-    from .conversion import *
-except ImportError:
-    pass
-try:
-    from .warp_wrappers import *
-except ImportError:
-    pass
+from .conversion import *
+from .warp_wrappers import *
