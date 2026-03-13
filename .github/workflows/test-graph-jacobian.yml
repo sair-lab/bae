@@ -34,7 +34,7 @@ jobs:
       - name: Build C++ extensions
         env:
           USE_CUDSS: "0"
-          TORCH_CUDA_ARCH_LIST: "7.0;7.5;8.0;8.6;8.9;9.0"
+          TORCH_CUDA_ARCH_LIST: "8.0;8.6;8.9;9.0"
         run: python -m pip install --break-system-packages --no-build-isolation -v -e .
 
       - name: Run tests
