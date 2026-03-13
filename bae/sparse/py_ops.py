@@ -5,7 +5,12 @@ from typing import Optional, Callable
 
 import torch
 from torch.utils._triton import has_triton
-from .spgemm import convert_indices_from_csr_to_coo
+try:
+    from .spgemm import convert_indices_from_csr_to_coo
+except ImportError:
+    # The `spgemm` C++ extension wraps `at::_convert_indices_from_csr_to_coo` directly.
+    # Fall back to the same underlying ATen function when the extension is not built.
+    convert_indices_from_csr_to_coo = torch._convert_indices_from_csr_to_coo
 
 USE_TRITON = True
 

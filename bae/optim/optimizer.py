@@ -6,7 +6,15 @@ import pypose as pp
 from ..autograd.graph import jacobian
 from ..autograd.function import TrackingTensor
 from ..sparse.py_ops import diagonal_op_
-from ..sparse.spgemm import CuSparse
+try:
+    from ..sparse.spgemm import CuSparse
+except ImportError:
+    class CuSparse:  # type: ignore[no-redef]
+        def __init__(self, *args, **kwargs):
+            raise ImportError(
+                "CuSparse is unavailable: the bae.sparse.spgemm extension was not built. "
+                "Run `python setup.py build_ext --inplace` to build it."
+            )
 
 
 
