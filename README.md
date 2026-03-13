@@ -18,7 +18,8 @@
 - **Levenberg-Marquardt Optimizer**: Custom implementation of the LM algorithm for non-linear least squares problems
 
 ### Future Plan
-- [ ] An new backend for [distributed solver](https://github.com/NVIDIA/AMGX)  
+- [ ] An new backend for [distributed solver](https://github.com/NVIDIA/AMGX)
+- [ ] Add Apple Silicon GPU support
 
 ## Installation
 
@@ -31,22 +32,31 @@
 ### Setup Instructions
 
 1. (Optional) Install CUDSS (recommended through package manager)
-2. Install PyPose from the bae branch:
+   - For CUDA 12 (0.6.0)
+   ```bash
+   sudo apt install cudss=0.6.0-1 cudss0=0.6.0-1 cudss-cuda-12=0.6.0.5-1 \
+   libcudss0-cuda-12=0.6.0.5-1 libcudss0-dev-cuda-12=0.6.0.5-1 libcudss0-static-cuda-12=0.6.0.5-1  
+   ```
+   - For CUDA 13
+   ```bash
+   sudo apt install cudss-cuda-13
+   ```
+3. Install PyPose from the bae branch:
    ```bash
    pip install git+https://github.com/pypose/pypose.git@bae
    ```
-3. Clone this repository:
+4. Clone this repository:
    ```bash
    git clone https://github.com/zitongzhan/bae.git
    cd bae
    ```
 
-4. Install dependencies:
+5. Install dependencies:
    ```bash
    pip install -r requirements.txt
    ```
 
-5. Install the package in development mode:
+6. Install the package in development mode:
    ```bash
    python -m pip install --no-build-isolation -v -e .  # following https://github.com/pytorch/pytorch
    ```

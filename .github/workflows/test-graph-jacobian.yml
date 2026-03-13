@@ -26,10 +26,16 @@ jobs:
 
       - name: Install dependencies
         run: |
-          python -m pip install --break-system-packages --no-cache-dir --target /tmp/pydeps pytest
+          python -m pip install --break-system-packages --no-cache-dir --target /tmp/pydeps pytest warp-lang
           python -m pip install --break-system-packages --no-cache-dir --target /tmp/pydeps --no-deps --no-build-isolation "git+https://github.com/pypose/pypose.git@bae"
         env:
           PIP_CACHE_DIR: /tmp/pip-cache
+
+      - name: Build C++ extensions
+        env:
+          USE_CUDSS: "0"
+          TORCH_CUDA_ARCH_LIST: "8.0;8.6;8.9;9.0"
+        run: python -m pip install --break-system-packages --no-build-isolation -v -e .
 
       - name: Run tests
         env:

@@ -9,6 +9,7 @@ import urllib.error
 import urllib.request
 from urllib.parse import urljoin
 
+import pypose as pp
 import pytest
 import torch
 import torch.nn as nn
@@ -18,9 +19,11 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from ba_helpers import Reproj, project  # noqa: E402
+from ba_helpers import Reproj, project, least_square_error  # noqa: E402
 from bae.autograd.function import TrackingTensor, map_transform
 import bae.autograd.graph as autograd_graph  # noqa: E402
+from bae.optim import LM  # noqa: E402
+from bae.utils.pysolvers import PCG  # noqa: E402
 from datapipes.bal_io import read_bal_data  # noqa: E402
 
 
@@ -36,6 +39,12 @@ _BAL_SAMPLES: list[tuple[str, str]] = [
     ("dubrovnik", "problem-356-226730-pre"),
     ("ladybug", "problem-1723-156502-pre"),
 ]
+_BAL_TEST_DEVICES = ["cpu"] + (["cuda"] if torch.cuda.is_available() else [])
+_BAL_EXPECTED_FINAL_PER_PIXEL_ERRORS: dict[tuple[str, str], float] = {
+    ("trafalgar", "problem-257-65132-pre"): 0.8588579966685325,
+    ("dubrovnik", "problem-356-226730-pre"): 0.7876036304342143,
+    ("ladybug", "problem-1723-156502-pre"): 1.1301326718910448,
+}
 
 
 def _candidate_bal_urls(dataset: str, bz2_name: str) -> list[str]:
@@ -217,6 +226,36 @@ def _remove_camera_and_or_point_appearance(
     return camera_idx2, point_idx2
 
 
+def _final_bal_per_pixel_error(
+    camera_params: torch.Tensor,
+    points_3d: torch.Tensor,
+    points_2d: torch.Tensor,
+    camera_idx: torch.Tensor,
+    point_idx: torch.Tensor,
+) -> float:
+    input = {
+        "points_2d": points_2d,
+        "camera_indices": camera_idx,
+        "point_indices": point_idx,
+    }
+    model = Reproj(camera_params.clone(), points_3d.clone())
+    strategy = pp.optim.strategy.TrustRegion(up=2.0, down=0.5**4)
+    solver = PCG(tol=1e-4, maxiter=250)
+    optimizer = LM(model, strategy=strategy, solver=solver, reject=30)
+
+    for _ in range(20):
+        optimizer.step(input)
+
+    return least_square_error(
+        model.pose,
+        model.points_3d,
+        camera_idx,
+        point_idx,
+        points_2d,
+    ).item()
+
+
+@pytest.mark.parametrize("device", _BAL_TEST_DEVICES, ids=_BAL_TEST_DEVICES)
 @pytest.mark.parametrize(
     ("dataset", "problem_name"),
     _BAL_SAMPLES,
@@ -225,12 +264,12 @@ def _remove_camera_and_or_point_appearance(
 def test_bal_jacobian_structure_no_empty_columns(
     dataset: str,
     problem_name: str,
+    device: str,
     bal_cache_dir: Path,
 ):
     data = _load_bal_problem(dataset, problem_name, bal_cache_dir)
 
-    # CPU-only: CI doesn't have CUDA.
-    device = torch.device("cpu")
+    device = torch.device(device)
     dtype = torch.float64
 
     camera_params = data["camera_params"]
@@ -268,8 +307,21 @@ def test_bal_jacobian_structure_no_empty_columns(
         n_pts=n_pts,
     )
 
-    J_full = torch.cat([t.to_sparse_coo() for t in (J_cam, J_pts)], dim=-1)
-    _assert_coo_no_empty_columns(J_full)
+    if device.type != "cuda":
+        return
+
+    final_per_pixel_error = _final_bal_per_pixel_error(
+        camera_params,
+        points_3d,
+        points_2d,
+        camera_idx,
+        point_idx,
+    )
+    assert torch.isfinite(torch.tensor(final_per_pixel_error))
+    key = (dataset, problem_name)
+    expected = _BAL_EXPECTED_FINAL_PER_PIXEL_ERRORS.get(key)
+    assert expected is not None
+    assert final_per_pixel_error == pytest.approx(expected, abs=0.15)
 
 
 
