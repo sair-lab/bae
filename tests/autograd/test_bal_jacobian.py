@@ -347,6 +347,55 @@ class ReprojCat(nn.Module):
         return points_proj - points_2d
 
 
+class ReprojFixedFirstCameraCat(nn.Module):
+    def __init__(self, camera_params_rest, points_3d):
+        super().__init__()
+        self.pose_rest = nn.Parameter(TrackingTensor(camera_params_rest))
+        self.points_3d = nn.Parameter(TrackingTensor(points_3d))
+        self.pose_rest.trim_SE3_grad = True
+
+    def forward(self, points_2d, camera_indices, point_indices, camera_fixed):
+        camera_params = torch.cat([camera_fixed, self.pose_rest], dim=0)
+        points_proj = project(self.points_3d[point_indices], camera_params[camera_indices])
+        return points_proj - points_2d
+
+
+def _final_bal_per_pixel_error_fixed_first_camera_cat(
+    camera_params: torch.Tensor,
+    points_3d: torch.Tensor,
+    points_2d: torch.Tensor,
+    camera_idx: torch.Tensor,
+    point_idx: torch.Tensor,
+) -> float:
+    if camera_params.shape[0] < 2:
+        pytest.skip("BAL sample has <2 cameras; cannot construct fixed-first-camera case.")
+
+    camera_fixed = camera_params[:1].clone()
+    input = {
+        "points_2d": points_2d,
+        "camera_indices": camera_idx,
+        "point_indices": point_idx,
+        "camera_fixed": camera_fixed,
+    }
+
+    model = ReprojFixedFirstCameraCat(camera_params[1:].clone(), points_3d.clone())
+    strategy = pp.optim.strategy.TrustRegion(up=2.0, down=0.5**4)
+    solver = PCG(tol=1e-4, maxiter=250)
+    optimizer = LM(model, strategy=strategy, solver=solver, reject=30)
+
+    for _ in range(20):
+        optimizer.step(input)
+
+    camera_all = torch.cat([camera_fixed, model.pose_rest], dim=0)
+    return least_square_error(
+        camera_all,
+        model.points_3d,
+        camera_idx,
+        point_idx,
+        points_2d,
+    ).item()
+
+
 @pytest.mark.parametrize(
     ("dataset", "problem_name"),
     _BAL_SAMPLES,
@@ -405,6 +454,80 @@ def test_bal_jacobian_cat_split_points_no_empty_columns(
     diag = torch.zeros(J_full.shape[1], dtype=J_full.dtype, device=J_full.device)
     diag.scatter_add_(0, J_full.indices()[1].to(torch.int64), J_full.values().square())
     assert (diag > 0).all()
+
+
+@pytest.mark.parametrize("device", _BAL_TEST_DEVICES, ids=_BAL_TEST_DEVICES)
+@pytest.mark.parametrize(
+    ("dataset", "problem_name"),
+    _BAL_SAMPLES,
+    ids=[f"{ds}.{name}" for ds, name in _BAL_SAMPLES],
+)
+def test_bal_jacobian_cat_fixed_first_camera_gauge_free(
+    dataset: str,
+    problem_name: str,
+    device: str,
+    bal_cache_dir: Path,
+):
+    data = _load_bal_problem(dataset, problem_name, bal_cache_dir)
+
+    device = torch.device(device)
+    dtype = torch.float64
+
+    camera_params = data["camera_params"].to(device=device, dtype=dtype)
+    points_3d = data["points_3d"].to(device=device, dtype=dtype)
+    points_2d = data["points_2d"].to(device=device, dtype=dtype)
+    camera_idx = data["camera_index_of_observations"].to(torch.int32).to(device=device)
+    point_idx = data["point_index_of_observations"].to(torch.int32).to(device=device)
+
+    n_cams = int(camera_params.shape[0])
+    if n_cams < 2:
+        pytest.skip("BAL sample has <2 cameras; cannot construct fixed-first-camera case.")
+
+    if (camera_idx == 0).sum().item() == 0:
+        pytest.skip("BAL sample has no observations for camera 0; cannot verify fixed-camera branch.")
+
+    camera_fixed = camera_params[:1].clone()
+    model = ReprojFixedFirstCameraCat(camera_params[1:].clone(), points_3d.clone()).to(device)
+    residual = model(points_2d, camera_idx, point_idx, camera_fixed)
+    n_obs = int(points_2d.shape[0])
+
+    J_cam_rest, J_pts = autograd_graph.jacobian(residual, [model.pose_rest, model.points_3d])
+    assert J_cam_rest.layout == torch.sparse_bsr
+    assert J_pts.layout == torch.sparse_bsr
+
+    n_cams_rest = int(model.pose_rest.shape[0])
+    n_pts = int(model.points_3d.shape[0])
+
+    assert J_cam_rest.shape == (n_obs * 2, n_cams_rest * 9)
+    assert J_pts.shape == (n_obs * 2, n_pts * 3)
+
+    expected_cam_cols = (camera_idx[camera_idx > 0] - 1).to(dtype=J_cam_rest.col_indices().dtype)
+    assert torch.equal(J_cam_rest.col_indices(), expected_cam_cols)
+    assert torch.unique(J_cam_rest.col_indices()).numel() == n_cams_rest
+    assert torch.equal(J_pts.col_indices(), point_idx)
+    assert torch.unique(J_pts.col_indices()).numel() == n_pts
+
+    J_full = torch.cat([J_cam_rest.to_sparse_coo(), J_pts.to_sparse_coo()], dim=-1).coalesce()
+    _assert_coo_no_empty_columns(J_full)
+    diag = torch.zeros(J_full.shape[1], dtype=J_full.dtype, device=J_full.device)
+    diag.scatter_add_(0, J_full.indices()[1].to(torch.int64), J_full.values().square())
+    assert (diag > 0).all()
+
+    if device.type != "cuda":
+        return
+
+    final_per_pixel_error = _final_bal_per_pixel_error_fixed_first_camera_cat(
+        camera_params,
+        points_3d,
+        points_2d,
+        camera_idx,
+        point_idx,
+    )
+    assert torch.isfinite(torch.tensor(final_per_pixel_error))
+    key = (dataset, problem_name)
+    expected = _BAL_EXPECTED_FINAL_PER_PIXEL_ERRORS.get(key)
+    assert expected is not None
+    assert final_per_pixel_error == pytest.approx(expected, abs=0.15)
 
 
 @pytest.mark.parametrize(
