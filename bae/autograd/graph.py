@@ -232,6 +232,12 @@ def backward(output_):
             n = arg.shape[0]
             start, end = offset, offset + n
 
+            # Fixed/non-optimizable tensors (e.g., gauge-fixed first pose) do
+            # not need Jacobian traces.
+            if not (hasattr(arg, 'optrace') or isinstance(arg, torch.nn.Parameter)):
+                offset = end
+                continue
+
             if type(upstream) is tuple:
                 jac_trace = _slice_upstream_tuple_columns(
                     upstream[0], upstream[1], start, end, out_cols_blocks=n
