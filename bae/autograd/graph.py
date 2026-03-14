@@ -146,7 +146,7 @@ def backward(output_):
         args = output_.optrace[id(output_)][2]
         argnums = tuple(idx for idx, arg in enumerate(args) if hasattr(arg, 'optrace') or isinstance(arg, torch.nn.Parameter))
         if len(argnums) == 0:
-            warning("No upstream parameters to compute jacobian")
+            warnings.warn("No upstream parameters to compute jacobian", stacklevel=2)
             return
         jac_blocks = torch.vmap(jacrev(func, argnums=argnums))(*args)
         for jacidx, argidx in enumerate(argnums):
