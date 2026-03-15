@@ -1,22 +1,15 @@
-from functools import partial
 import os
+import time
 import torch
 import argparse
 import pypose as pp
 from torch import nn
-from torch.func import jacrev
 from bae.autograd.function import TrackingTensor, map_transform
-from bae.autograd.graph import construct_sbt
-from bae.sparse.py_ops import diagonal_op_
 
 from bae.utils.pgo_dataset import G2OPGO
 from bae.utils.pgo import plot_and_save
-import pypose.optim.solver as ppos
-import pypose.optim.kernel as ppok
-import pypose.optim.corrector as ppoc
-import pypose.optim.strategy as ppost
 from pypose.optim.scheduler import StopOnPlateau
-from bae.utils.pysolvers import PCG, cuSolverSP
+from bae.utils.pysolvers import PCG
 from bae.optim import LM
 
 OPTIMIZE_INTRINSICS = False
@@ -116,7 +109,20 @@ class PoseGraph(nn.Module):
         return foo(poses, node1, node2, infos)
 
 
-from bae.optim import LM
+class PoseGraphFixedFirst(nn.Module):
+    def __init__(self, nodes_rest):
+        super().__init__()
+        self.nodes_rest = nn.Parameter(TrackingTensor(nodes_rest))
+        self.nodes_rest.trim_SE3_grad = True
+
+    def nodes_all(self, node_fixed):
+        return torch.cat([node_fixed, self.nodes_rest], dim=0)
+
+    def forward(self, edges, poses, infos, node_fixed):
+        nodes = self.nodes_all(node_fixed)
+        node1 = nodes[edges[..., 0]]
+        node2 = nodes[edges[..., 1]]
+        return foo(poses, node1, node2, infos)
 
 
 if __name__ == '__main__':
@@ -133,22 +139,36 @@ if __name__ == '__main__':
                         help="to save memory")
     parser.add_argument('--vectorize', action='store_true', \
                         help='to accelerate computation')
+    parser.add_argument("--steps", type=int, default=80, \
+                        help="number of LM outer iterations")
+    parser.add_argument('--no-gauge-fix', dest='gauge_fix', action='store_false', \
+                        help='optimize all nodes (disables fixed-first-node gauge constraint)')
+    parser.set_defaults(gauge_fix=True)
     parser.set_defaults(vectorize=True)
     args = parser.parse_args(); print(args)
     os.makedirs(os.path.join(args.save), exist_ok=True)
 
     data = G2OPGO(args.dataroot, args.dataname, device=args.device, download=True)
+    if isinstance(data.nodes, pp.LieTensor):
+        data.nodes = data.nodes.tensor()
+    if isinstance(data.poses, pp.LieTensor):
+        data.poses = data.poses.tensor()
     data.nodes = data.nodes.to(DTYPE)
     data.poses = data.poses.to(DTYPE)
     data.infos = data.infos.to(DTYPE)
 
     edges, poses, infos = data.edges, data.poses, data.infos
     infos = torch.linalg.cholesky(infos)
-    input = {'edges': edges, 'poses': poses, 'infos': infos}
-
-    graph = PoseGraph(data.nodes).to(args.device)
-    # solver = PCG(tol=1e-5)
-    solver = cuSolverSP()
+    if args.gauge_fix:
+        if data.nodes.shape[0] < 2:
+            raise ValueError("Gauge-fix mode requires at least two nodes.")
+        node_fixed = data.nodes[:1].clone()
+        input = {'edges': edges, 'poses': poses, 'infos': infos, 'node_fixed': node_fixed}
+        graph = PoseGraphFixedFirst(data.nodes[1:]).to(args.device)
+    else:
+        input = {'edges': edges, 'poses': poses, 'infos': infos}
+        graph = PoseGraph(data.nodes).to(args.device)
+    solver = PCG(tol=1e-5)
     # solver = ppos.Cholesky()
     # strategy = ppost.TrustRegion(radius=1e4, min=1e-32, max=1e16)
     # strategy = pp.optim.strategy.TrustRegion(up=2.0, down=0.5**4)
@@ -157,26 +177,42 @@ if __name__ == '__main__':
     optimizer = LM(graph, solver=solver, strategy=strategy, min=1e-10, reject=30)
     scheduler = StopOnPlateau(optimizer, steps=20, patience=3, decreasing=1e-7, verbose=True)
 
+    if args.gauge_fix:
+        nodes_current = graph.nodes_all(input['node_fixed'])
+    else:
+        nodes_current = graph.nodes
+
     pngname = os.path.join(args.save, args.dataname+'.png')
-    axlim = plot_and_save(pp.SE3(graph.nodes).translation(), pngname, args.dataname)
+    axlim = plot_and_save(pp.SE3(nodes_current).translation(), pngname, args.dataname)
     axlim = None
     ### the 1st implementation: for customization and easy to extend
-    start = torch.cuda.Event(enable_timing=True)
-    end = torch.cuda.Event(enable_timing=True)
-    start.record()
-    for i in range(10):
+    if args.device == 'cuda':
+        start = torch.cuda.Event(enable_timing=True)
+        end = torch.cuda.Event(enable_timing=True)
+        start.record()
+    else:
+        start = time.perf_counter()
+    for i in range(args.steps):
         loss = optimizer.step(input=input, weight=infos)
         scheduler.step(loss)
 
         name = os.path.join(args.save, args.dataname + '_' + str(scheduler.steps))
         title = 'PGO at the %d step(s) with loss %7f'%(scheduler.steps, loss.item())
-    torch.cuda.synchronize()
-    end.record()
-    print('Time elapsed: %.3f ms'%(start.elapsed_time(end)))
+    if args.device == 'cuda':
+        torch.cuda.synchronize()
+        end.record()
+        print('Time elapsed: %.3f ms'%(start.elapsed_time(end)))
+    else:
+        elapsed_ms = (time.perf_counter() - start) * 1000.0
+        print('Time elapsed: %.3f ms'%(elapsed_ms))
     print('Final loss: %7f'%(loss.item()/2))
-    plot_and_save(pp.SE3(graph.nodes).translation(), name+'.png', title, axlim=axlim)
+    if args.gauge_fix:
+        nodes_current = graph.nodes_all(input['node_fixed'])
+    else:
+        nodes_current = graph.nodes
+    plot_and_save(pp.SE3(nodes_current).translation(), name+'.png', title, axlim=axlim)
     torch.save(graph.state_dict(), name+'.pt')
-    write_ceres_txt(graph.nodes, name+'.txt')
+    write_ceres_txt(nodes_current, name+'.txt')
 
     ### The 2nd implementation: equivalent to the 1st one, but more compact
     # scheduler.optimize(input=(edges, poses, infos))
