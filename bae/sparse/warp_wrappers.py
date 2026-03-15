@@ -64,10 +64,34 @@ def format_vec_for_bsr(tvec, block_shape):
     return vwp
 
 def _sparse_csr_add(input, other, alpha=1.0):
-    input = torchbsr2wp(input)
-    other = torchbsr2wp(other)
-    res = wps.bsr_axpy(other, input, alpha=alpha)
-    res = wp2torchbsr(res)
+    if input.layout != torch.sparse_bsr or other.layout != torch.sparse_bsr:
+        raise ValueError("Both input and other must be sparse BSR tensors.")
+    # bsr_axpy mutates its destination argument, so keep the ATen add contract
+    # by operating on a cloned destination.
+    input_dst = torch.sparse_bsr_tensor(
+        crow_indices=input.crow_indices().clone(),
+        col_indices=input.col_indices().clone(),
+        values=input.values().clone(),
+        size=input.shape,
+        device=input.device,
+        dtype=input.dtype,
+    )
+    input_wp = torchbsr2wp(input_dst)
+    other_wp = torchbsr2wp(other)
+    res = wp2torchbsr(wps.bsr_axpy(other_wp, input_wp, alpha=alpha))
+
+    # Warp can over-allocate `col` / `values`; trim using nnz from crow[-1].
+    nnz = int(res.crow_indices()[-1].item()) if res.crow_indices().numel() > 0 else 0
+    if res.col_indices().numel() != nnz or res.values().shape[0] != nnz:
+        res = torch.sparse_bsr_tensor(
+            crow_indices=res.crow_indices(),
+            col_indices=res.col_indices()[:nnz].contiguous(),
+            values=res.values()[:nnz].contiguous(),
+            size=res.shape,
+            device=res.device,
+            dtype=res.dtype,
+        )
+
     return res
 
 from torch.library import Library
