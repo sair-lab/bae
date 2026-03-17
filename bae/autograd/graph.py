@@ -5,6 +5,8 @@ import warnings
 import torch
 from torch.func import jacrev
 
+from ..utils.ceres_pose import pose_plus_jacobian_xyzw
+
 
 def _crow_to_row_indices(crow_indices: torch.Tensor) -> torch.Tensor:
     counts = (crow_indices[1:] - crow_indices[:-1]).to(torch.int64)
@@ -141,7 +143,12 @@ def update_from_trace(bsrt: torch.Tensor, arg, new_col: Optional[torch.Tensor]=N
             )
     return jac_trace
 
-def backward(output_):
+def backward(output_, is_root=False):
+    # For non-root recursion, no incoming trace means no contribution to
+    # propagate. This avoids re-initializing identity traces on revisits.
+    if (not is_root) and (not hasattr(output_, 'jactrace')):
+        return
+
     if output_.optrace[id(output_)][0] == 'map':
         func = output_.optrace[id(output_)][1]
         args = output_.optrace[id(output_)][2]
@@ -175,9 +182,22 @@ def backward(output_):
                 elif isinstance(output_.jactrace, torch.Tensor) and output_.jactrace.layout == torch.sparse_bsr:
                     jac_trace = update_from_trace(output_.jactrace, arg, new_val=jac_block)
             amend_trace(arg, jac_trace)
+        # Recurse once per unique upstream tensor after all local contributions
+        # have been accumulated.
+        seen = set()
         for argidx in argnums:
-            if isinstance(args[argidx], torch.Tensor) and hasattr(args[argidx], 'optrace'):
-                backward(args[argidx])
+            arg = args[argidx]
+            if isinstance(arg, torch.Tensor) and hasattr(arg, 'optrace'):
+                arg_id = id(arg)
+                if arg_id in seen:
+                    continue
+                seen.add(arg_id)
+                backward(arg, is_root=False)
+
+        # Consume intermediate trace to avoid re-propagating it when this node is
+        # reached again from another downstream branch (e.g. two index ops on one cat).
+        if hasattr(output_, 'jactrace'):
+            delattr(output_, 'jactrace')
 
 
     elif output_.optrace[id(output_)][0] == 'index':
@@ -188,6 +208,8 @@ def backward(output_):
         # populate Jacobian values. In this case, the Jacobian block values are
         # identity matrices placed at the indexed columns.
         if not hasattr(output_, 'jactrace'):
+            if not is_root:
+                return
             if output_.ndim == 1:
                 eye_blocks = torch.ones((output_.shape[0], 1, 1), device=output_.device, dtype=output_.dtype)
             else:
@@ -210,7 +232,10 @@ def backward(output_):
             
         amend_trace(arg, jac_trace)
         if isinstance(arg, torch.Tensor) and hasattr(arg, 'optrace'):
-            backward(arg)
+            backward(arg, is_root=False)
+
+        if hasattr(output_, 'jactrace'):
+            delattr(output_, 'jactrace')
 
     elif output_.optrace[id(output_)][0] == 'cat':
         dim = output_.optrace[id(output_)][1]
@@ -219,6 +244,8 @@ def backward(output_):
             raise NotImplementedError("Only torch.cat(..., dim=0) is supported")
 
         if not hasattr(output_, 'jactrace'):
+            if not is_root:
+                return
             if output_.ndim == 1:
                 eye_blocks = torch.ones((output_.shape[0], 1, 1), device=output_.device, dtype=output_.dtype)
             else:
@@ -252,17 +279,39 @@ def backward(output_):
 
             amend_trace(arg, jac_trace)
             if isinstance(arg, torch.Tensor) and hasattr(arg, 'optrace'):
-                backward(arg)
+                backward(arg, is_root=False)
             offset = end
+
+        if hasattr(output_, 'jactrace'):
+            delattr(output_, 'jactrace')
 
 
 def jacobian(output, params):
     assert output.optrace[id(output)][0] in ('map', 'index', 'cat'), "Unsupported last operation in compute graph"
-    backward(output)
+    backward(output, is_root=True)
     res = []
     for param in params:
         if hasattr(param, 'jactrace'):
-            if getattr(param, 'trim_SE3_grad', False):
+            if getattr(param, 'ceres_pose_grad', False):
+                if type(param.jactrace) is tuple:
+                    param.jactrace = construct_sbt(
+                        param.jactrace[1], param.shape[0], param.jactrace[0], type=torch.sparse_bsr
+                    )
+
+                if isinstance(param.jactrace, torch.Tensor) and param.jactrace.layout == torch.sparse_bsr:
+                    plus = pose_plus_jacobian_xyzw(param.detach())[param.jactrace.col_indices().to(torch.long)]
+                    values = param.jactrace.values() @ plus
+                    param.jactrace = torch.sparse_bsr_tensor(
+                        col_indices=param.jactrace.col_indices(),
+                        crow_indices=param.jactrace.crow_indices(),
+                        values=values,
+                        size=(param.jactrace.shape[0], param.shape[0] * values.shape[-1]),
+                        device=param.device,
+                    )
+                else:
+                    values = param.jactrace @ pose_plus_jacobian_xyzw(param.detach())
+                    param.jactrace = values
+            elif getattr(param, 'trim_SE3_grad', False):
                 if isinstance(param.jactrace, tuple):
                     values = param.jactrace[1]
                 elif isinstance(param.jactrace, torch.Tensor) and param.jactrace.layout == torch.sparse_bsr:

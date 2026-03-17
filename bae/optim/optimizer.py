@@ -20,8 +20,9 @@ class LM(ppLM):
     def step(self, input, target=None, weight=None):
         for pg in self.param_groups:
             weight = self.weight if weight is None else weight
-            R = list(self.model(input))
-            R = R[0]
+            R = self.model(input, target)
+            if isinstance(R, (tuple, list)):
+                R = R[0]
             J = jacobian(R, pg['params'])
             if isinstance(R, TrackingTensor):
                 R = R.tensor()
@@ -59,14 +60,22 @@ class LM(ppLM):
         numels = []
         for param in params:
             if param.requires_grad:
-                if getattr(param, 'trim_SE3_grad', False):
+                if getattr(param, 'ceres_pose_grad', False):
+                    numels.append(math.prod(param.shape[:-1]) * 6)
+                elif getattr(param, 'trim_SE3_grad', False):
                     numels.append(math.prod(param.shape[:-1]) * (param.shape[-1] - 1))
                 else:
                     numels.append(param.numel())
         steps = step.split(numels)
         for (param, d) in zip(params, steps):
             if param.requires_grad:
-                if getattr(param, 'trim_SE3_grad', False):
+                if getattr(param, 'ceres_pose_grad', False):
+                    d = d.view(param.shape[0], -1)
+                    param[..., :3] += d[..., :3]
+                    param[..., 3:7] = pp.SO3(param[..., 3:7]).add_(pp.so3(d[..., 3:6])).tensor()
+                    if param.shape[-1] > 7:
+                        param[:, 7:] += d[:, 6:]
+                elif getattr(param, 'trim_SE3_grad', False):
                     param[..., :7] = pp.SE3(param[..., :7]).add_(pp.se3(d.view(param.shape[0], -1)[..., :6]))
                     if param.shape[-1] > 7:
                         param[:, 7:] += d.view(param.shape[0], -1)[:, 6:]
