@@ -61,12 +61,6 @@ def write_ceres_txt(nodes, filename='data.s'):
             f.write(f'{i} {node[0].item()} {node[1].item()} {node[2].item()} {node[3].item()} {node[4].item()} {node[5].item()} {node[6].item()}\n')
 
 def _pose_graph_residual(poses, node1, node2, infos):
-    residual = (pp.SE3(poses).Inv() @ pp.SE3(node1).Inv() @ pp.SE3(node2)).Log().tensor()
-    residual = infos @ residual[..., None]
-    return residual[..., 0]
-
-
-def _ceres_pose_graph_residual(poses, node1, node2, infos):
     if isinstance(poses, TrackingTensor):
         poses = poses.tensor()
     if isinstance(node1, TrackingTensor):
@@ -99,43 +93,26 @@ def _ceres_pose_graph_residual(poses, node1, node2, infos):
 def _tracked_pose_graph_residual(poses, node1, node2, infos):
     return _pose_graph_residual(poses, node1, node2, infos)
 
-
-@map_transform
-def _tracked_ceres_pose_graph_residual(poses, node1, node2, infos):
-    return _ceres_pose_graph_residual(poses, node1, node2, infos)
-
 class PoseGraph(nn.Module):
 
-    def __init__(self, nodes, residual_type='ceres'):
+    def __init__(self, nodes):
         super().__init__()
         self.nodes = nn.Parameter(TrackingTensor(nodes))
         self.nodes.trim_SE3_grad = True
-        self.nodes.ceres_pose_grad = residual_type == 'ceres'
-        if residual_type == 'log':
-            self.residual_fn = _tracked_pose_graph_residual
-        elif residual_type == 'ceres':
-            self.residual_fn = _tracked_ceres_pose_graph_residual
-        else:
-            raise ValueError(f"Unsupported residual_type: {residual_type}")
+        self.nodes.ceres_pose_grad = True
 
     def forward(self, edges, poses, infos):
         node1 = self.nodes[edges[..., 0]]
         node2 = self.nodes[edges[..., 1]]
-        return self.residual_fn(poses, node1, node2, infos)
+        return _tracked_pose_graph_residual(poses, node1, node2, infos)
 
 
 class PoseGraphFixedFirst(nn.Module):
-    def __init__(self, nodes_rest, residual_type='ceres'):
+    def __init__(self, nodes_rest):
         super().__init__()
         self.nodes_rest = nn.Parameter(TrackingTensor(nodes_rest))
         self.nodes_rest.trim_SE3_grad = True
-        self.nodes_rest.ceres_pose_grad = residual_type == 'ceres'
-        if residual_type == 'log':
-            self.residual_fn = _tracked_pose_graph_residual
-        elif residual_type == 'ceres':
-            self.residual_fn = _tracked_ceres_pose_graph_residual
-        else:
-            raise ValueError(f"Unsupported residual_type: {residual_type}")
+        self.nodes_rest.ceres_pose_grad = True
 
     def nodes_all(self, node_fixed):
         return torch.cat([node_fixed, self.nodes_rest], dim=0)
@@ -144,7 +121,7 @@ class PoseGraphFixedFirst(nn.Module):
         nodes = self.nodes_all(node_fixed)
         node1 = nodes[edges[..., 0]]
         node2 = nodes[edges[..., 1]]
-        return self.residual_fn(poses, node1, node2, infos)
+        return _tracked_pose_graph_residual(poses, node1, node2, infos)
 
 
 if __name__ == '__main__':
@@ -163,8 +140,6 @@ if __name__ == '__main__':
                         help='to accelerate computation')
     parser.add_argument("--steps", type=int, default=80, \
                         help="number of LM outer iterations")
-    parser.add_argument("--residual-type", type=str, default='ceres', choices=('log', 'ceres'),
-                        help="residual parameterization to optimize")
     parser.add_argument('--no-gauge-fix', dest='gauge_fix', action='store_false', \
                         help='optimize all nodes (disables fixed-first-node gauge constraint)')
     parser.set_defaults(gauge_fix=True)
@@ -188,10 +163,10 @@ if __name__ == '__main__':
             raise ValueError("Gauge-fix mode requires at least two nodes.")
         node_fixed = data.nodes[:1].clone()
         input = {'edges': edges, 'poses': poses, 'infos': infos, 'node_fixed': node_fixed}
-        graph = PoseGraphFixedFirst(data.nodes[1:], residual_type=args.residual_type).to(args.device)
+        graph = PoseGraphFixedFirst(data.nodes[1:]).to(args.device)
     else:
         input = {'edges': edges, 'poses': poses, 'infos': infos}
-        graph = PoseGraph(data.nodes, residual_type=args.residual_type).to(args.device)
+        graph = PoseGraph(data.nodes).to(args.device)
     solver = PCG(tol=1e-5)
     # solver = ppos.Cholesky()
     # strategy = ppost.TrustRegion(radius=1e4, min=1e-32, max=1e16)
