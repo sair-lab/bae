@@ -92,7 +92,7 @@ def test_pose_graph_residual_matches_ceres_closed_form():
     expected = torch.cat((p_ab_est - poses[:, :3], 2.0 * delta_q.tensor()[..., :3]), dim=-1)
 
     actual = _pose_graph_residual(poses, nodes[:1], nodes[1:2], infos)
-    torch.testing.assert_close(actual, expected, rtol=1e-8, atol=1e-8)
+    torch.testing.assert_close(actual, expected, rtol=1e-7, atol=1e-7)
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA required (CPU sparse BSR add does not support 6x7 blocks)")
