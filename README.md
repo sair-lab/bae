@@ -34,13 +34,13 @@
 <table>
   <tr>
     <td align="center" width="33%">
-      <img src="https://github.com/sair-lab/bae/blob/gh-page/docs/sphere_bignoise_vertex3.gif?raw=true" alt="Sphere big-noise optimization" width="100%" />
+      <img src="https://github.com/sair-lab/bae/blob/gh-page/docs/assets/sphere_bignoise_vertex3.gif?raw=true" alt="Sphere big-noise optimization" width="100%" />
     </td>
     <td align="center" width="33%">
-      <img src="https://github.com/sair-lab/bae/blob/gh-page/docs/grid3D.gif?raw=true" alt="3D grid optimization" width="100%" />
+      <img src="https://github.com/sair-lab/bae/blob/gh-page/docs/assets/grid3D.gif?raw=true" alt="3D grid optimization" width="100%" />
     </td>
     <td align="center" width="33%">
-      <img src="https://github.com/sair-lab/bae/blob/gh-page/docs/sphere_g2o.gif?raw=true" alt="Sphere g2o optimization" width="100%" />
+      <img src="https://github.com/sair-lab/bae/blob/gh-page/docs/assets/sphere_g2o.gif?raw=true" alt="Sphere g2o optimization" width="100%" />
     </td>
   </tr>
   <tr>
