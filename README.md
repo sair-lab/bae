@@ -33,7 +33,7 @@
   </tr>
 </table>
 
-<p align="center"><sub><code>bae</code> powering BA and global positioning in downstream system, InstantSfM.</sub></p>
+<p align="center"><sub><code>bae</code> powering BA and global positioning in downstream system, <a href="https://github.com/cre185/InstantSfM">InstantSfM</a>.</sub></p>
 
 ### Pose Graph Optimization
 
