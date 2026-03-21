@@ -12,17 +12,17 @@
   <tr>
     <td align="center" width="33%">
       <p align="center" width="100%">
-        <video src="https://github.com/user-attachments/assets/db9082b9-7e62-4e16-a299-71638de2d757" width="100%"></video>
+        <video src="https://github.com/user-attachments/assets/db9082b9-7e62-4e16-a299-71638de2d757" width="100%" autoplay loop muted playsinline></video>
       </p>
     </td>
     <td align="center" width="33%">
       <p align="center" width="100%">
-        <video src="https://github.com/user-attachments/assets/545a722d-fa21-4353-911d-1e0bc9526b31" width="100%"></video>
+        <video src="https://github.com/user-attachments/assets/545a722d-fa21-4353-911d-1e0bc9526b31" width="100%" autoplay loop muted playsinline></video>
       </p>
     </td>
     <td align="center" width="33%">
       <p align="center" width="100%">
-        <video src="https://github.com/user-attachments/assets/4dcaef63-4f2e-4870-bc85-9b6690dd00b7" width="100%"></video>
+        <video src="https://github.com/user-attachments/assets/4dcaef63-4f2e-4870-bc85-9b6690dd00b7" width="100%" autoplay loop muted playsinline></video>
       </p>
     </td>
   </tr>
