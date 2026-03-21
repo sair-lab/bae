@@ -4,6 +4,25 @@
 
 `bae` is a PyTorch-based library supporting 2nd-order optimization techniques. The library provides efficient implementations for sparse optimization problems in robotics, particularly Bundle Adjustment (BA) and Pose Graph Optimization (PGO).
 
+<table>
+  <tr>
+    <td align="center" width="33%">
+      <img src="https://github.com/sair-lab/bae/blob/gh-page/docs/sphere_bignoise_vertex3.gif?raw=true" alt="Sphere big-noise optimization" width="100%" />
+    </td>
+    <td align="center" width="33%">
+      <img src="https://github.com/sair-lab/bae/blob/gh-page/docs/grid3D.gif?raw=true" alt="3D grid optimization" width="100%" />
+    </td>
+    <td align="center" width="33%">
+      <img src="https://github.com/sair-lab/bae/blob/gh-page/docs/sphere_g2o.gif?raw=true" alt="Sphere g2o optimization" width="100%" />
+    </td>
+  </tr>
+  <tr>
+    <td align="center">Sphere Big Noise</td>
+    <td align="center">Grid3D</td>
+    <td align="center">Sphere (g2o)</td>
+  </tr>
+</table>
+
 ## News
 
 - 2025-12-12: Added a VGGT integration example.
