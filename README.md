@@ -11,13 +11,19 @@
 <table>
   <tr>
     <td align="center" width="33%">
-      <img src="https://github.com/sair-lab/bae/blob/gh-page/docs/assets/garden.gif?raw=true" alt="Garden bundle adjustment example" width="100%" />
+      <p align="center" width="100%">
+        <video src="https://github.com/cre185/InstantSfM/raw/refs/heads/gh-pages/static/videos/garden.mp4" width="100%" autoplay loop muted playsinline controls></video>
+      </p>
     </td>
     <td align="center" width="33%">
-      <img src="https://github.com/sair-lab/bae/blob/gh-page/docs/assets/counter.gif?raw=true" alt="Counter bundle adjustment example" width="100%" />
+      <p align="center" width="100%">
+        <video src="https://github.com/cre185/InstantSfM/raw/refs/heads/gh-pages/static/videos/counter.mp4" width="100%" autoplay loop muted playsinline controls></video>
+      </p>
     </td>
     <td align="center" width="33%">
-      <img src="https://github.com/sair-lab/bae/blob/gh-page/docs/assets/kitchen.gif?raw=true" alt="Kitchen bundle adjustment example" width="100%" />
+      <p align="center" width="100%">
+        <video src="https://github.com/cre185/InstantSfM/raw/refs/heads/gh-pages/static/videos/kitchen.mp4" width="100%" autoplay loop muted playsinline controls></video>
+      </p>
     </td>
   </tr>
   <tr>
