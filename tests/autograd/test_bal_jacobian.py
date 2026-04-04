@@ -19,7 +19,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from ba_helpers import Reproj, project, least_square_error  # noqa: E402
+from ba_example import Residual, project, least_square_error  # noqa: E402
 from bae.autograd.function import TrackingTensor, map_transform
 import bae.autograd.graph as autograd_graph  # noqa: E402
 from bae.optim import LM  # noqa: E402
@@ -234,11 +234,11 @@ def _final_bal_per_pixel_error(
     point_idx: torch.Tensor,
 ) -> float:
     input = {
-        "points_2d": points_2d,
-        "camera_indices": camera_idx,
-        "point_indices": point_idx,
+        "observes": points_2d,
+        "cidx": camera_idx,
+        "pidx": point_idx,
     }
-    model = Reproj(camera_params.clone(), points_3d.clone())
+    model = Residual(camera_params.clone(), points_3d.clone())
     strategy = pp.optim.strategy.TrustRegion(up=2.0, down=0.5**4)
     solver = PCG(tol=1e-4, maxiter=250)
     optimizer = LM(model, strategy=strategy, solver=solver, reject=30)
@@ -248,7 +248,7 @@ def _final_bal_per_pixel_error(
 
     return least_square_error(
         model.pose,
-        model.points_3d,
+        model.points,
         camera_idx,
         point_idx,
         points_2d,
@@ -284,16 +284,16 @@ def test_bal_jacobian_structure_no_empty_columns(
     camera_idx = camera_idx.to(device=device)
     point_idx = point_idx.to(device=device)
 
-    model = Reproj(camera_params.clone(), points_3d.clone()).to(device)
+    model = Residual(camera_params.clone(), points_3d.clone()).to(device)
     residual = model(points_2d, camera_idx, point_idx)
     n_obs = int(points_2d.shape[0])
 
-    J_cam, J_pts = autograd_graph.jacobian(residual, [model.pose, model.points_3d])
+    J_cam, J_pts = autograd_graph.jacobian(residual, [model.pose, model.points])
     assert J_cam.layout == torch.sparse_bsr
     assert J_pts.layout == torch.sparse_bsr
 
     n_cams = model.pose.shape[0]
-    n_pts = model.points_3d.shape[0]
+    n_pts = model.points.shape[0]
 
     assert J_cam.shape == (n_obs * 2, n_cams * 9)
     assert J_pts.shape == (n_obs * 2, n_pts * 3)
@@ -603,9 +603,9 @@ def test_bal_jacobian_structure_assert_failed_when_missing_observation_appearanc
         n_pts=n_pts,
     )
 
-    model = Reproj(camera_params.clone(), points_3d.clone()).to(device)
+    model = Residual(camera_params.clone(), points_3d.clone()).to(device)
     residual = model(points_2d, camera_idx2, point_idx2)
-    J_cam, J_pts = autograd_graph.jacobian(residual, [model.pose, model.points_3d])
+    J_cam, J_pts = autograd_graph.jacobian(residual, [model.pose, model.points])
 
     with pytest.raises(AssertionError):
         _assert_bal_correctness_criteria(

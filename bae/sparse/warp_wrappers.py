@@ -63,9 +63,22 @@ def format_vec_for_bsr(tvec, block_shape):
     vwp = wp.from_torch(tvec, dtype=y_dtype)
     return vwp
 
-def _sparse_csr_add(input, other, alpha=1.0):
+
+def _validate_bsr_add(input, other):
     if input.layout != torch.sparse_bsr or other.layout != torch.sparse_bsr:
         raise ValueError("Both input and other must be sparse BSR tensors.")
+    if input.shape != other.shape:
+        raise ValueError(f"Expected matching sparse BSR shapes, got {input.shape} and {other.shape}.")
+    blocksize = tuple(input.values().shape[-2:])
+    if tuple(other.values().shape[-2:]) != blocksize:
+        raise ValueError(
+            f"Expected matching sparse BSR block shapes, got {blocksize} and {tuple(other.values().shape[-2:])}."
+        )
+    return blocksize
+
+
+def _sparse_csr_add_cuda(input, other, alpha=1.0):
+    _validate_bsr_add(input, other)
     # bsr_axpy mutates its destination argument, so keep the ATen add contract
     # by operating on a cloned destination.
     input_dst = torch.sparse_bsr_tensor(
@@ -94,9 +107,16 @@ def _sparse_csr_add(input, other, alpha=1.0):
 
     return res
 
+
+def _sparse_csr_add_cpu(input, other, alpha=1.0):
+    blocksize = _validate_bsr_add(input, other)
+    result = torch.add(input.to_sparse_coo(), other.to_sparse_coo(), alpha=alpha).coalesce()
+    return result.to_sparse_bsr(blocksize)
+
 from torch.library import Library
 sparse_lib = Library('aten', 'IMPL')
-sparse_lib.impl('add.Tensor', _sparse_csr_add, 'SparseCsrCUDA')
+sparse_lib.impl('add.Tensor', _sparse_csr_add_cuda, 'SparseCsrCUDA')
+sparse_lib.impl('add.Tensor', _sparse_csr_add_cpu, 'SparseCsrCPU')
 # this will, however, invalidate add_sparse_csr
 
 

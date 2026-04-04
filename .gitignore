@@ -11,3 +11,5 @@ tmp_debug/*
 task.md
 *.pickle
 *.png
+.DS_Store
+tmp/*

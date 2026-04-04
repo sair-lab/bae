@@ -1,9 +1,10 @@
 import pytest
+import pypose as pp
 import torch
 from torch import nn
 from torch.func import jacrev
 
-from bae.autograd.function import TrackingTensor as Track
+from bae.autograd.function import TrackingTensor as Track, map_transform
 from bae.autograd.graph import jacobian as sparse_jacobian
 
 
@@ -29,6 +30,11 @@ class ToyResidual(nn.Module):
 def _flatten_jac(J: torch.Tensor) -> torch.Tensor:
     n, outdim, num, indim = J.shape
     return J.reshape(n * outdim, num * indim)
+
+
+@map_transform
+def _relative_se3_residual(poses: pp.LieTensor, node1: pp.LieTensor, node2: pp.LieTensor) -> torch.Tensor:
+    return (poses.Inv() @ node1.Inv() @ node2).Log().tensor()
 
 
 @pytest.mark.parametrize("device", ["cpu", "cuda"])
@@ -273,3 +279,71 @@ def test_sparse_jacobian_index_after_cat_matches_torch_jacrev(device: str):
     JA, JB = jacrev(f, argnums=(0, 1))(A0, B0)
     torch.testing.assert_close(JA_sparse.to_dense(), _flatten_jac(JA), rtol=1e-10, atol=1e-10)
     torch.testing.assert_close(JB_sparse.to_dense(), _flatten_jac(JB), rtol=1e-10, atol=1e-10)
+
+
+@pytest.mark.parametrize("device", ["cpu", "cuda"])
+def test_tracking_lie_tensor_index_and_cat_preserve_ltype(device: str):
+    if device == "cuda" and not torch.cuda.is_available():
+        pytest.skip("CUDA not available")
+
+    torch.manual_seed(0)
+    dtype = torch.float64
+
+    nodes = nn.Parameter(Track(pp.randn_SE3(5, device=device, dtype=dtype)))
+    idx_a = torch.tensor([0, 2, 4], device=device, dtype=torch.int64)
+    idx_b = torch.tensor([1, 3, 4], device=device, dtype=torch.int64)
+
+    node_a = nodes[idx_a]
+    node_b = nodes[idx_b]
+    cat = torch.cat([node_a, node_b], dim=0)
+
+    assert isinstance(nodes, Track)
+    assert isinstance(nodes, pp.LieTensor)
+    assert isinstance(node_a, Track)
+    assert isinstance(node_a, pp.LieTensor)
+    assert type(node_a.ltype) is type(nodes.ltype)
+    assert hasattr(node_a, "optrace")
+    assert node_a.optrace[id(node_a)][0] == "index"
+
+    assert node_a.tensor().shape == (idx_a.numel(), 7)
+    assert node_a.translation().shape == (idx_a.numel(), 3)
+    assert node_a.rotation().shape == (idx_a.numel(), 4)
+    assert isinstance(node_a.Inv(), pp.LieTensor)
+    assert isinstance(node_a.Log(), pp.LieTensor)
+
+    assert isinstance(cat, Track)
+    assert isinstance(cat, pp.LieTensor)
+    assert type(cat.ltype) is type(nodes.ltype)
+    assert hasattr(cat, "optrace")
+    assert cat.optrace[id(cat)][0] == "cat"
+    assert cat.translation().shape == (idx_a.numel() + idx_b.numel(), 3)
+
+
+@pytest.mark.parametrize("device", ["cpu", "cuda"])
+def test_sparse_jacobian_matches_lie_tensor_pgo_residual(device: str):
+    if device == "cuda" and not torch.cuda.is_available():
+        pytest.skip("CUDA not available")
+
+    torch.manual_seed(0)
+    dtype = torch.float64
+
+    num_nodes = 5
+    num_edges = 4
+    nodes0 = pp.randn_SE3(num_nodes, device=device, dtype=dtype)
+    poses = pp.randn_SE3(num_edges, device=device, dtype=dtype)
+    idx1 = torch.tensor([0, 1, 2, 3], device=device, dtype=torch.int64)
+    idx2 = torch.tensor([1, 2, 3, 4], device=device, dtype=torch.int64)
+
+    model = nn.Parameter(Track(nodes0))
+    out = _relative_se3_residual(poses, model[idx1], model[idx2])
+
+    (J_sparse,) = sparse_jacobian(out, [model])
+
+    nodes_tensor = nodes0.tensor().detach().clone().requires_grad_(True)
+
+    def f(nodes_data: torch.Tensor) -> torch.Tensor:
+        nodes = pp.SE3(nodes_data)
+        return (poses.Inv() @ nodes[idx1].Inv() @ nodes[idx2]).Log().tensor()
+
+    (J_dense,) = jacrev(f, argnums=(0,))(nodes_tensor)
+    torch.testing.assert_close(J_sparse.to_dense(), _flatten_jac(J_dense[..., :6]), rtol=1e-10, atol=1e-10)

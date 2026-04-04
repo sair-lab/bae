@@ -2,10 +2,13 @@
 from typing import Optional
 import warnings
 
+import pypose as pp
 import torch
 from torch.func import jacrev
 
 from ..utils.ceres_pose import pose_plus_jacobian_xyzw
+from ..sparse import warp_wrappers as _warp_wrappers  # noqa: F401
+from ..utils.parameter import trim_parameter_jacobian_values
 
 
 def _crow_to_row_indices(crow_indices: torch.Tensor) -> torch.Tensor:
@@ -110,6 +113,34 @@ def construct_sbt(jac_from_vmap, num, index: Optional[torch.Tensor], type=torch.
                                     size = (n * block_shape[0], num * block_shape[1]),
                                     device=index.device, dtype=jac_from_vmap.dtype)
 
+def _clear_jactrace(output, params):
+    seen = set()
+    stack = [output, *params]
+    while stack:
+        tensor = stack.pop()
+        if not isinstance(tensor, torch.Tensor) or id(tensor) in seen:
+            continue
+        seen.add(id(tensor))
+
+        if hasattr(tensor, 'jactrace'):
+            delattr(tensor, 'jactrace')
+
+        if not hasattr(tensor, 'optrace') or id(tensor) not in tensor.optrace:
+            continue
+
+        op = tensor.optrace[id(tensor)][0]
+        if op == 'map':
+            args = tensor.optrace[id(tensor)][2]
+            stack.extend(arg for arg in args if isinstance(arg, torch.Tensor))
+        elif op == 'index':
+            arg = tensor.optrace[id(tensor)][2]
+            if isinstance(arg, torch.Tensor):
+                stack.append(arg)
+        elif op == 'cat':
+            args = tensor.optrace[id(tensor)][2]
+            stack.extend(arg for arg in args if isinstance(arg, torch.Tensor))
+
+
 def amend_trace(arg, jac_trace: tuple):
     if hasattr(arg, 'jactrace'):  # convert to sparse_bsr needed for accumulation
         if type(arg.jactrace) is tuple and type(jac_trace) is tuple:
@@ -156,7 +187,8 @@ def backward(output_, is_root=False):
         if len(argnums) == 0:
             warnings.warn("No upstream parameters to compute jacobian", stacklevel=2)
             return
-        jac_blocks = torch.vmap(jacrev(func, argnums=argnums))(*args)
+        with pp.retain_ltype():
+            jac_blocks = torch.vmap(jacrev(func, argnums=argnums))(*args)
         for jacidx, argidx in enumerate(argnums):
             jac_block = jac_blocks[jacidx]
             arg = args[argidx]
@@ -288,57 +320,35 @@ def backward(output_, is_root=False):
 
 def jacobian(output, params):
     assert output.optrace[id(output)][0] in ('map', 'index', 'cat'), "Unsupported last operation in compute graph"
-    backward(output, is_root=True)
-    res = []
-    for param in params:
-        if hasattr(param, 'jactrace'):
-            if getattr(param, 'ceres_pose_grad', False):
+    _clear_jactrace(output, params)
+    try:
+        backward(output)
+        res = []
+        for param in params:
+            if hasattr(param, 'jactrace'):
+                if isinstance(param.jactrace, tuple):
+                    if getattr(param, 'ceres_pose_grad', False):
+                        values = param.jactrace @ pose_plus_jacobian_xyzw(param.detach())
+                        param.jactrace = (param.jactrace[0], values)
+                    else: 
+                        values = trim_parameter_jacobian_values(param, param.jactrace[1])
+                elif isinstance(param.jactrace, torch.Tensor) and param.jactrace.layout == torch.sparse_bsr:
+                    if getattr(param, 'ceres_pose_grad', False):
+                        plus = pose_plus_jacobian_xyzw(param.detach())[param.jactrace.col_indices().to(torch.long)]
+                        values = param.jactrace.values() @ plus
+                    else:
+                        values = trim_parameter_jacobian_values(param, param.jactrace.values())
+                    if values.shape != param.jactrace.values().shape:
+                        param.jactrace = torch.sparse_bsr_tensor(
+                            col_indices=param.jactrace.col_indices(),
+                            crow_indices=param.jactrace.crow_indices(),
+                            values=values,
+                            size=(param.jactrace.shape[0], param.shape[0] * values.shape[-1]),
+                            device=param.device,
+                        )
                 if type(param.jactrace) is tuple:
-                    param.jactrace = construct_sbt(
-                        param.jactrace[1], param.shape[0], param.jactrace[0], type=torch.sparse_bsr
-                    )
-
-                if isinstance(param.jactrace, torch.Tensor) and param.jactrace.layout == torch.sparse_bsr:
-                    plus = pose_plus_jacobian_xyzw(param.detach())[param.jactrace.col_indices().to(torch.long)]
-                    values = param.jactrace.values() @ plus
-                    param.jactrace = torch.sparse_bsr_tensor(
-                        col_indices=param.jactrace.col_indices(),
-                        crow_indices=param.jactrace.crow_indices(),
-                        values=values,
-                        size=(param.jactrace.shape[0], param.shape[0] * values.shape[-1]),
-                        device=param.device,
-                    )
-                else:
-                    values = param.jactrace @ pose_plus_jacobian_xyzw(param.detach())
-                    param.jactrace = values
-            elif getattr(param, 'trim_SE3_grad', False):
-                if isinstance(param.jactrace, tuple):
-                    values = param.jactrace[1]
-                elif isinstance(param.jactrace, torch.Tensor) and param.jactrace.layout == torch.sparse_bsr:
-                    values = param.jactrace.values()
-                else:
-                    values = param.jactrace
-
-                if values.shape[-1] == 7:
-                    values = values[..., :6]
-                else:
-                    values = torch.cat([values[..., :6], values[..., 7:]], dim=-1)
-                
-                if isinstance(param.jactrace, tuple):
-                    param.jactrace = (param.jactrace[0], values)
-                elif isinstance(param.jactrace, torch.Tensor) and param.jactrace.layout == torch.sparse_bsr:
-                    param.jactrace = torch.sparse_bsr_tensor(
-                        col_indices=param.jactrace.col_indices(), 
-                        crow_indices=param.jactrace.crow_indices(),
-                        values=values,
-                        size=(param.jactrace.shape[0], param.shape[0] * values.shape[-1]),
-                        device=param.device,
-                    )
-                else:
-                    param.jactrace = values
-            if type(param.jactrace) is tuple:
-                param.jactrace = construct_sbt(param.jactrace[1], param.shape[0], param.jactrace[0], type=torch.sparse_bsr)
-            res.append(param.jactrace)
-            delattr(param, 'jactrace')
-            
-    return res
+                    param.jactrace = construct_sbt(param.jactrace[1], param.shape[0], param.jactrace[0], type=torch.sparse_bsr)
+                res.append(param.jactrace)
+        return res
+    finally:
+        _clear_jactrace(output, params)

@@ -1,11 +1,70 @@
-# `bae`: Bundle Adjustment in the Eager-mode
+<h1 align="center"><code>bae</code>: Bundle Adjustment in the Eager-mode</h1>
+
+<p align="center">
+  <a href="https://github.com/zitongzhan">Zitong Zhan</a>, <a href="https://www.linkedin.com/in/huan-xu-999700169/?locale=en_US">Huan Xu</a>, Zihang Fang, <a href="https://www.linkedin.com/in/william-xp-wei/">Xinpeng Wei</a>, <a href="https://theairlab.org/team/yaoyuh/">Yaoyu Hu</a>, and <a href="https://sairlab.org">Chen Wang</a>
+</p>
+
+<p align="center">
+  <a href="https://sairlab.org/bae/">🌐 Project Page</a> | <a href="https://arxiv.org/abs/2409.12190">📄 PDF</a>
+</p>
 
 > **⚠️ Development Phase Notice**: This library is currently in active development. APIs are subject to change and should be considered experimental. Use at your own discretion in production environments.
 
-`bae` is a PyTorch-based library supporting 2nd-order optimization techniques. The library provides efficient implementations for sparse optimization problems in robotics, particularly Bundle Adjustment (BA) and Pose Graph Optimization (PGO).
+`bae` is a PyTorch-based library supporting **exact** 2nd-order optimization techniques. The library provides efficient implementations for sparse optimization problems in robotics, particularly Bundle Adjustment (BA) and Pose Graph Optimization (PGO).
+
+### Bundle Adjustment
+
+<table>
+  <tr>
+    <td align="center" width="33%">
+      <p align="center" width="100%">
+        <img src="https://github.com/sair-lab/bae/blob/gh-page/docs/assets/garden_half.gif?raw=true" alt="Garden bundle adjustment example" width="100%" />
+      </p>
+    </td>
+    <td align="center" width="33%">
+      <p align="center" width="100%">
+        <img src="https://github.com/sair-lab/bae/blob/gh-page/docs/assets/counter_half.gif?raw=true" alt="Counter bundle adjustment example" width="100%" />
+      </p>
+    </td>
+    <td align="center" width="33%">
+      <p align="center" width="100%">
+        <img src="https://github.com/sair-lab/bae/blob/gh-page/docs/assets/kitchen_half.gif?raw=true" alt="Kitchen bundle adjustment example" width="100%" />
+      </p>
+    </td>
+  </tr>
+  <tr>
+    <td align="center">Garden</td>
+    <td align="center">Counter</td>
+    <td align="center">Kitchen</td>
+  </tr>
+</table>
+
+<p align="center"><sub><code>bae</code> powering BA and global positioning in downstream system, <a href="https://github.com/cre185/InstantSfM">InstantSfM</a>.</sub></p>
+
+### Pose Graph Optimization
+
+<table>
+  <tr>
+    <td align="center" width="33%">
+      <img src="https://github.com/sair-lab/bae/blob/gh-page/docs/assets/sphere_bignoise_vertex3.gif?raw=true" alt="Sphere big-noise optimization" width="100%" />
+    </td>
+    <td align="center" width="33%">
+      <img src="https://github.com/sair-lab/bae/blob/gh-page/docs/assets/grid3D.gif?raw=true" alt="3D grid optimization" width="100%" />
+    </td>
+    <td align="center" width="33%">
+      <img src="https://github.com/sair-lab/bae/blob/gh-page/docs/assets/sphere_g2o.gif?raw=true" alt="Sphere g2o optimization" width="100%" />
+    </td>
+  </tr>
+  <tr>
+    <td align="center">Sphere Big Noise</td>
+    <td align="center">Grid3D</td>
+    <td align="center">Sphere (g2o)</td>
+  </tr>
+</table>
 
 ## News
 
+- 2026-03-22: Added [skills](.agent/skills) for coding agents to write custom compute graphs.
 - 2025-12-12: Added a VGGT integration example.
 
 ## Features
@@ -18,8 +77,10 @@
 - **Levenberg-Marquardt Optimizer**: Custom implementation of the LM algorithm for non-linear least squares problems
 
 ### Future Plan
+- [ ] Add Apple Silicon GPU support, [PyTorch PR WIP](https://github.com/pytorch/pytorch/pull/177757)
+- [ ] Reduce runtime overhead using CUDA graph
+- [ ] Distributed Tensor (DTensor) support
 - [ ] An new backend for [distributed solver](https://github.com/NVIDIA/AMGX)
-- [ ] Add Apple Silicon GPU support
 
 ## Installation
 
@@ -66,6 +127,15 @@ If you are unable to install cudss with the system package manager, you can cont
 
 - `USE_CUDSS`: Set to "1" (default) to enable CUDSS support, "0" to disable
 - `CUDSS_DIR`: Optional path to CUDSS installation directory if not in standard locations
+
+## Agent Skills
+
+This repo includes skills in [.agent/skills](.agent/skills):
+
+<!-- - [`bae-codebase`](.agent/skills/bae-codebase/SKILL.md): general guidance for working in this repository -->
+- [`bae-compute-graph`](.agent/skills/bae-compute-graph/SKILL.md): guidance for defining BAL/PGO and more complex compute graphs
+
+<!-- Use `bae-compute-graph` for most changes, and add `bae-compute-graph` when working on residual definitions or Jacobian structure. -->
 
 ## Example Usage
 
@@ -123,14 +193,6 @@ python demo_colmap.py --scene_dir /path/to/scene --use_ba --implementation bae  
 
 This command invokes `prepare_bae(...)` inside `vggt/demo_colmap.py`, which wraps VGGT tracks and predictions into `bae.optim.LM` and updates `extrinsic`, `intrinsic`, and `points_3d` in place before writing `scene_dir/sparse/` in COLMAP format.
 
-## Dataset Support
-
-The library supports common optimization datasets and tasks:
-
-- **Bundle Adjustment in the Large (BAL)** dataset
-- **1DSfM** dataset for large-scale structure from motion
-- **G2O** pose graph datasets
-
 ## Performance
 
 `bae` is designed for high performance using:
@@ -149,7 +211,7 @@ If you use `bae` in your research, please cite:
   title = {Bundle Adjustment in the Eager Mode},
   author = {Zhan, Zitong and Xu, Huan and Fang, Zihang and Wei, Xinpeng and Hu, Yaoyu and Wang, Chen},
   journal = {arXiv preprint arXiv:2409.12190},
-  year = {2025},
+  year = {2024},
   url = {https://arxiv.org/abs/2409.12190}
 }
 ```
@@ -159,3 +221,4 @@ If you use `bae` in your research, please cite:
 The implementation draws inspiration from:
 - [PyPose](https://github.com/pypose/pypose) for SE(3) pose representations
 - GTSAM for reprojection jacobian concepts
+- Ceres for manifold parameter update

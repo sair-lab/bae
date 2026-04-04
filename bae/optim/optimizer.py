@@ -1,5 +1,4 @@
 from functools import partial
-import math
 import torch
 from pypose.optim import LevenbergMarquardt as ppLM
 import pypose as pp
@@ -7,6 +6,7 @@ from ..autograd.graph import jacobian
 from ..autograd.function import TrackingTensor
 from ..sparse.py_ops import diagonal_op_
 from ..sparse.spgemm import CuSparse
+from ..utils.parameter import parameter_update_shape
 
 
 
@@ -40,7 +40,6 @@ class LM(ppLM):
                 diagonal_op_(A, op=partial(torch.mul, other=1+pg['damping']))
                 try:
                     D = self.solver(A, -J_T @ R.view(-1, 1))
-                    D = D[:, None]
                 except Exception as e:
                     print(e, "\nLinear solver failed. Breaking optimization step...")
                     break
@@ -59,24 +58,20 @@ class LM(ppLM):
         numels = []
         for param in params:
             if param.requires_grad:
-                if getattr(param, 'ceres_pose_grad', False):
-                    numels.append(math.prod(param.shape[:-1]) * 6)
-                elif getattr(param, 'trim_SE3_grad', False):
-                    numels.append(math.prod(param.shape[:-1]) * (param.shape[-1] - 1))
-                else:
-                    numels.append(param.numel())
+                numels.append(torch.Size(parameter_update_shape(param)).numel())
         steps = step.split(numels)
         for (param, d) in zip(params, steps):
             if param.requires_grad:
+                step_view = d.view(parameter_update_shape(param))
                 if getattr(param, 'ceres_pose_grad', False):
                     d = d.view(param.shape[0], -1)
                     param[..., :3] += d[..., :3]
                     param[..., 3:7] = pp.SO3(param[..., 3:7]).add_(pp.so3(d[..., 3:6])).tensor()
                     if param.shape[-1] > 7:
                         param[:, 7:] += d[:, 6:]
-                elif getattr(param, 'trim_SE3_grad', False):
-                    param[..., :7] = pp.SE3(param[..., :7]).add_(pp.se3(d.view(param.shape[0], -1)[..., :6]))
+                if getattr(param, 'trim_SE3_grad', False):
+                    param[..., :7] = pp.SE3(param[..., :7]).add_(pp.se3(step_view[..., :6]))
                     if param.shape[-1] > 7:
-                        param[:, 7:] += d.view(param.shape[0], -1)[:, 6:]
+                        param[:, 7:] += step_view[..., 6:]
                 else:
-                    param.add_(d.view(param.shape))
+                    param.add_(step_view)

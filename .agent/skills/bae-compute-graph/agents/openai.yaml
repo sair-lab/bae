@@ -1,0 +1,4 @@
+interface:
+  display_name: "BAE Compute Graph"
+  short_description: "Define tracked residual graphs and sparse Jacobians with BAE to enable sparse 2nd order optimization."
+  default_prompt: "Define or modify a BAE compute graph and explain the resulting sparse Jacobian structure."

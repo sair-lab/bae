@@ -17,7 +17,7 @@ def _rotvec_to_quat_xyzw(rotvec: torch.Tensor) -> torch.Tensor:
     return torch.cat([xyz, cos_half], dim=-1)
 
 
-def read_bal_data(file_name: str, use_quat: bool = False) -> dict:
+def read_bal_data(file_name: str, use_quat: bool = True) -> dict:
     """
     Read a Bundle Adjustment in the Large dataset problem text file.
 
@@ -29,8 +29,8 @@ def read_bal_data(file_name: str, use_quat: bool = False) -> dict:
 
     Each camera has 9 parameters: Rodrigues rotvec (3), translation (3), f, k1, k2.
     This loader outputs either:
-      - use_quat=False: [tx, ty, tz, rx, ry, rz, f, k1, k2]  (9)
       - use_quat=True:  [tx, ty, tz, qx, qy, qz, qw, f, k1, k2] (10)
+      - use_quat=False: [tx, ty, tz, rx, ry, rz, f, k1, k2]  (9)
     """
     with open(file_name, "r") as file:
         n_cameras, n_points, n_observations = map(int, file.readline().split())
@@ -70,4 +70,3 @@ def read_bal_data(file_name: str, use_quat: bool = False) -> dict:
         "camera_index_of_observations": camera_indices,
         "point_index_of_observations": point_indices,
     }
-
