@@ -322,16 +322,20 @@ def jacobian(output, params):
     assert output.optrace[id(output)][0] in ('map', 'index', 'cat'), "Unsupported last operation in compute graph"
     _clear_jactrace(output, params)
     try:
-        backward(output)
+        backward(output, is_root=True)
         res = []
         for param in params:
             if hasattr(param, 'jactrace'):
                 if isinstance(param.jactrace, tuple):
+                    indices, values = param.jactrace
                     if getattr(param, 'ceres_pose_grad', False):
-                        values = param.jactrace @ pose_plus_jacobian_xyzw(param.detach())
-                        param.jactrace = (param.jactrace[0], values)
-                    else: 
-                        values = trim_parameter_jacobian_values(param, param.jactrace[1])
+                        plus = pose_plus_jacobian_xyzw(param.detach())
+                        if indices is not None:
+                            plus = plus[indices.to(torch.long)]
+                        values = values @ plus
+                    else:
+                        values = trim_parameter_jacobian_values(param, values)
+                    param.jactrace = (indices, values)
                 elif isinstance(param.jactrace, torch.Tensor) and param.jactrace.layout == torch.sparse_bsr:
                     if getattr(param, 'ceres_pose_grad', False):
                         plus = pose_plus_jacobian_xyzw(param.detach())[param.jactrace.col_indices().to(torch.long)]

@@ -69,7 +69,7 @@ class LM(ppLM):
                     param[..., 3:7] = pp.SO3(param[..., 3:7]).add_(pp.so3(d[..., 3:6])).tensor()
                     if param.shape[-1] > 7:
                         param[:, 7:] += d[:, 6:]
-                if getattr(param, 'trim_SE3_grad', False):
+                elif getattr(param, 'trim_SE3_grad', False):
                     param[..., :7] = pp.SE3(param[..., :7]).add_(pp.se3(step_view[..., :6]))
                     if param.shape[-1] > 7:
                         param[:, 7:] += step_view[..., 6:]
