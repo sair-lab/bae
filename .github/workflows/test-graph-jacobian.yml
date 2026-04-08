@@ -27,7 +27,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --break-system-packages --no-cache-dir --target /tmp/pydeps pytest warp-lang matplotlib
-          python -m pip install --break-system-packages --no-cache-dir --target /tmp/pydeps --no-deps --no-build-isolation "git+https://github.com/pypose/pypose.git@bae"
+          python -m pip install --break-system-packages --no-cache-dir --target /tmp/pydeps --no-deps --no-build-isolation "git+https://github.com/pypose/pypose.git"
         env:
           PIP_CACHE_DIR: /tmp/pip-cache
 
