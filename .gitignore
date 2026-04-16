@@ -13,3 +13,4 @@ task.md
 *.png
 .DS_Store
 tmp/*
+examples/module/pgo/data/*

@@ -1,6 +1,17 @@
 import torch
 
 
+def skew_symmetric(v: torch.Tensor) -> torch.Tensor:
+    x, y, z = v.unbind(dim=-1)
+    zero = torch.zeros_like(x)
+    rows = (
+        torch.stack((zero, -z, y), dim=-1),
+        torch.stack((z, zero, -x), dim=-1),
+        torch.stack((-y, x, zero), dim=-1),
+    )
+    return torch.stack(rows, dim=-2)
+
+
 def quat_mul_xyzw(q1: torch.Tensor, q2: torch.Tensor) -> torch.Tensor:
     x1, y1, z1, w1 = q1.unbind(dim=-1)
     x2, y2, z2, w2 = q2.unbind(dim=-1)
@@ -36,12 +47,13 @@ def quaternion_plus_jacobian_xyzw(quat: torch.Tensor) -> torch.Tensor:
     return 0.5 * torch.stack(rows, dim=-2)
 
 
-def pose_plus_jacobian_xyzw(pose: torch.Tensor) -> torch.Tensor:
+def se3_pose_plus_jacobian_xyzw(pose: torch.Tensor) -> torch.Tensor:
     if pose.shape[-1] != 7:
         raise ValueError(f"Expected 7D pose blocks, got {pose.shape[-1]}.")
 
     J = torch.zeros(*pose.shape[:-1], 7, 6, dtype=pose.dtype, device=pose.device)
     eye = torch.eye(3, dtype=pose.dtype, device=pose.device)
     J[..., :3, :3] = eye
+    J[..., :3, 3:6] = -skew_symmetric(pose[..., :3])
     J[..., 3:7, 3:6] = quaternion_plus_jacobian_xyzw(pose[..., 3:7])
     return J

@@ -6,7 +6,6 @@ import pypose as pp
 import torch
 from torch.func import jacrev
 
-from ..utils.ceres_pose import pose_plus_jacobian_xyzw
 from ..sparse import warp_wrappers as _warp_wrappers  # noqa: F401
 from ..utils.parameter import trim_parameter_jacobian_values
 
@@ -328,20 +327,14 @@ def jacobian(output, params):
             if hasattr(param, 'jactrace'):
                 if isinstance(param.jactrace, tuple):
                     indices, values = param.jactrace
-                    if getattr(param, 'ceres_pose_grad', False):
-                        plus = pose_plus_jacobian_xyzw(param.detach())
-                        if indices is not None:
-                            plus = plus[indices.to(torch.long)]
-                        values = values @ plus
-                    else:
-                        values = trim_parameter_jacobian_values(param, values)
+                    values = trim_parameter_jacobian_values(param, values, block_indices=indices)
                     param.jactrace = (indices, values)
                 elif isinstance(param.jactrace, torch.Tensor) and param.jactrace.layout == torch.sparse_bsr:
-                    if getattr(param, 'ceres_pose_grad', False):
-                        plus = pose_plus_jacobian_xyzw(param.detach())[param.jactrace.col_indices().to(torch.long)]
-                        values = param.jactrace.values() @ plus
-                    else:
-                        values = trim_parameter_jacobian_values(param, param.jactrace.values())
+                    values = trim_parameter_jacobian_values(
+                        param,
+                        param.jactrace.values(),
+                        block_indices=param.jactrace.col_indices(),
+                    )
                     if values.shape != param.jactrace.values().shape:
                         param.jactrace = torch.sparse_bsr_tensor(
                             col_indices=param.jactrace.col_indices(),

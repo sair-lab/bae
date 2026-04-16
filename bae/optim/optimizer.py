@@ -32,7 +32,10 @@ class LM(ppLM):
             self.reject_count = 0
             J_T = J_T.to_sparse_csr()
             J = J.to_sparse_csr()
-            A = self.mm(J_T, J)
+            if J.dtype == torch.float64:
+                A = self.mm(J_T, J)
+            else:
+                A = J_T @ J
 
             diagonal_op_(A, op=partial(torch.clamp_, min=pg['min'], max=pg['max']))
 
@@ -63,13 +66,7 @@ class LM(ppLM):
         for (param, d) in zip(params, steps):
             if param.requires_grad:
                 step_view = d.view(parameter_update_shape(param))
-                if getattr(param, 'ceres_pose_grad', False):
-                    d = d.view(param.shape[0], -1)
-                    param[..., :3] += d[..., :3]
-                    param[..., 3:7] = pp.SO3(param[..., 3:7]).add_(pp.so3(d[..., 3:6])).tensor()
-                    if param.shape[-1] > 7:
-                        param[:, 7:] += d[:, 6:]
-                elif getattr(param, 'trim_SE3_grad', False):
+                if getattr(param, 'trim_SE3_grad', False):
                     param[..., :7] = pp.SE3(param[..., :7]).add_(pp.se3(step_view[..., :6]))
                     if param.shape[-1] > 7:
                         param[:, 7:] += step_view[..., 6:]

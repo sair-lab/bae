@@ -5,11 +5,6 @@ import argparse
 import pypose as pp
 from torch import nn
 from bae.autograd.function import TrackingTensor, map_transform
-from bae.utils.ceres_pose import (
-    quat_inv_xyzw,
-    quat_mul_xyzw,
-    quat_rotate_xyzw,
-)
 
 from bae.utils.pgo_dataset import G2OPGO
 from bae.utils.pgo import plot_and_save, render_frame, save_gif
@@ -20,6 +15,12 @@ from bae.optim import LM
 OPTIMIZE_INTRINSICS = False
 USE_QUATERNIONS=True
 DTYPE = torch.float64
+DTYPE_CHOICES = {
+    'float64': torch.float64,
+    'fp64': torch.float64,
+    'float32': torch.float32,
+    'fp32': torch.float32,
+}
 
 torch.set_printoptions(precision=6)
 
@@ -61,28 +62,14 @@ def write_ceres_txt(nodes, filename='data.s'):
             f.write(f'{i} {node[0].item()} {node[1].item()} {node[2].item()} {node[3].item()} {node[4].item()} {node[5].item()} {node[6].item()}\n')
 
 def _pose_graph_residual(poses, node1, node2, infos):
-    if isinstance(poses, TrackingTensor):
-        poses = poses.tensor()
-    if isinstance(node1, TrackingTensor):
-        node1 = node1.tensor()
-    if isinstance(node2, TrackingTensor):
-        node2 = node2.tensor()
     if isinstance(infos, TrackingTensor):
         infos = infos.tensor()
 
-    p_a, q_a = node1[..., :3], node1[..., 3:7]
-    p_b, q_b = node2[..., :3], node2[..., 3:7]
-    p_meas, q_meas = poses[..., :3], poses[..., 3:7]
-
-    q_a_inv = quat_inv_xyzw(q_a)
-    q_ab_est = quat_mul_xyzw(q_a_inv, q_b)
-    p_ab_est = quat_rotate_xyzw(q_a_inv, p_b - p_a)
-
-    r_p = p_ab_est - p_meas
-
+    pose_ab_est = node1.Inv() @ node2
+    r_p = pose_ab_est.translation() - poses.translation()
     # Match Ceres pose_graph_3d: 2 * vec(q_meas * q_est^{-1}).
-    delta_q = quat_mul_xyzw(q_meas, quat_inv_xyzw(q_ab_est))
-    r_q = 2.0 * delta_q[..., :3]
+    delta_q = poses.rotation() @ pose_ab_est.rotation().Inv()
+    r_q = 2.0 * delta_q.tensor()[..., :3]
 
     residual = torch.cat((r_p, r_q), dim=-1)
     residual = infos @ residual[..., None]
@@ -98,8 +85,6 @@ class PoseGraph(nn.Module):
     def __init__(self, nodes):
         super().__init__()
         self.nodes = nn.Parameter(TrackingTensor(nodes))
-        self.nodes.trim_SE3_grad = True
-        self.nodes.ceres_pose_grad = True
 
     def forward(self, edges, poses, infos):
         node1 = self.nodes[edges[..., 0]]
@@ -111,8 +96,6 @@ class PoseGraphFixedFirst(nn.Module):
     def __init__(self, nodes_rest):
         super().__init__()
         self.nodes_rest = nn.Parameter(TrackingTensor(nodes_rest))
-        self.nodes_rest.trim_SE3_grad = True
-        self.nodes_rest.ceres_pose_grad = True
 
     def nodes_all(self, node_fixed):
         return torch.cat([node_fixed, self.nodes_rest], dim=0)
@@ -146,6 +129,8 @@ if __name__ == '__main__':
                         help='to accelerate computation')
     parser.add_argument("--steps", type=int, default=80, \
                         help="number of LM outer iterations")
+    parser.add_argument('--dtype', type=str, default='float64', choices=tuple(DTYPE_CHOICES.keys()), \
+                        help='parameter / residual dtype')
     parser.add_argument('--no-gauge-fix', dest='gauge_fix', action='store_false', \
                         help='optimize all nodes (disables fixed-first-node gauge constraint)')
     parser.set_defaults(gauge_fix=True)
@@ -154,15 +139,12 @@ if __name__ == '__main__':
     os.makedirs(os.path.join(args.save), exist_ok=True)
     if args.gif_every < 1:
         raise ValueError('--gif-every must be >= 1')
+    dtype = DTYPE_CHOICES[args.dtype]
 
     data = G2OPGO(args.dataroot, args.dataname, device=args.device, download=True)
-    if isinstance(data.nodes, pp.LieTensor):
-        data.nodes = data.nodes.tensor()
-    if isinstance(data.poses, pp.LieTensor):
-        data.poses = data.poses.tensor()
-    data.nodes = data.nodes.to(DTYPE)
-    data.poses = data.poses.to(DTYPE)
-    data.infos = data.infos.to(DTYPE)
+    data.nodes = data.nodes.to(dtype)
+    data.poses = data.poses.to(dtype)
+    data.infos = data.infos.to(dtype)
 
     edges, poses, infos = data.edges, data.poses, data.infos
     infos = torch.linalg.cholesky(infos)
@@ -187,11 +169,12 @@ if __name__ == '__main__':
         nodes_current = graph.nodes
 
     sample_prefix = os.path.join(args.save, os.path.splitext(args.dataname)[0])
-    plot_and_save(pp.SE3(nodes_current).translation(), sample_prefix + '.png', args.dataname)
+    nodes_current = nodes_current if isinstance(nodes_current, pp.LieTensor) else pp.SE3(nodes_current)
+    plot_and_save(nodes_current.translation(), sample_prefix + '.png', args.dataname)
 
     gif_frames = []
     if args.gif:
-        frame, _ = render_frame(pp.SE3(nodes_current).translation(), args.dataname)
+        frame, _ = render_frame(nodes_current.translation(), args.dataname)
         gif_frames.append(frame)
 
     if args.device == 'cuda':
@@ -211,11 +194,12 @@ if __name__ == '__main__':
                 nodes_current = graph.nodes_all(input['node_fixed'])
             else:
                 nodes_current = graph.nodes
-            frame, _ = render_frame(pp.SE3(nodes_current).translation(), title)
+            nodes_current = nodes_current if isinstance(nodes_current, pp.LieTensor) else pp.SE3(nodes_current)
+            frame, _ = render_frame(nodes_current.translation(), title)
             gif_frames.append(frame)
     if args.device == 'cuda':
-        torch.cuda.synchronize()
         end.record()
+        torch.cuda.synchronize()
         print('Time elapsed: %.3f ms'%(start.elapsed_time(end)))
     else:
         elapsed_ms = (time.perf_counter() - start) * 1000.0
@@ -225,9 +209,10 @@ if __name__ == '__main__':
         nodes_current = graph.nodes_all(input['node_fixed'])
     else:
         nodes_current = graph.nodes
-    plot_and_save(pp.SE3(nodes_current).translation(), name+'.png', title)
+    nodes_current = nodes_current if isinstance(nodes_current, pp.LieTensor) else pp.SE3(nodes_current)
+    plot_and_save(nodes_current.translation(), name+'.png', title)
     torch.save(graph.state_dict(), name+'.pt')
-    write_ceres_txt(nodes_current, name+'.txt')
+    write_ceres_txt(nodes_current.tensor() if isinstance(nodes_current, pp.LieTensor) else nodes_current, name+'.txt')
     if args.gif:
         save_gif(gif_frames, sample_prefix + '.gif', duration=args.gif_duration)
 

@@ -19,6 +19,8 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
+os.environ.setdefault("BAE_USE_PYPOSE_AMBIENT_GRAD", "1")
+
 from ba_example import Residual, project, least_square_error  # noqa: E402
 from bae.autograd.function import TrackingTensor, map_transform
 import bae.autograd.graph as autograd_graph  # noqa: E402
