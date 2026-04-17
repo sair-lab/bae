@@ -1,11 +1,24 @@
+import os
+
 import pytest
 import pypose as pp
 import torch
 from torch import nn
 from torch.func import jacrev
 
+os.environ.setdefault("BAE_USE_PYPOSE_AMBIENT_GRAD", "1")
+
 from bae.autograd.function import TrackingTensor as Track, map_transform
 from bae.autograd.graph import jacobian as sparse_jacobian
+from bae.utils.ceres_pose import se3_pose_plus_jacobian_xyzw
+from bae.utils.pypose_ambient_grad import (
+    install_pypose_ambient_grad_monkeypatch,
+    pypose_ambient_grad_enabled,
+)
+
+
+if pypose_ambient_grad_enabled():
+    install_pypose_ambient_grad_monkeypatch()
 
 
 class ToyResidual(nn.Module):
@@ -30,6 +43,12 @@ class ToyResidual(nn.Module):
 def _flatten_jac(J: torch.Tensor) -> torch.Tensor:
     n, outdim, num, indim = J.shape
     return J.reshape(n * outdim, num * indim)
+
+
+def _localize_pose_blocks_se3(jac_dense: torch.Tensor, nodes: torch.Tensor) -> torch.Tensor:
+    jac_dense = jac_dense.reshape(jac_dense.shape[0], nodes.shape[0], 7)
+    plus = se3_pose_plus_jacobian_xyzw(nodes)
+    return torch.einsum("bni,nij->bnj", jac_dense, plus).reshape(jac_dense.shape[0], nodes.shape[0] * 6)
 
 
 @map_transform
@@ -346,4 +365,8 @@ def test_sparse_jacobian_matches_lie_tensor_pgo_residual(device: str):
         return (poses.Inv() @ nodes[idx1].Inv() @ nodes[idx2]).Log().tensor()
 
     (J_dense,) = jacrev(f, argnums=(0,))(nodes_tensor)
-    torch.testing.assert_close(J_sparse.to_dense(), _flatten_jac(J_dense[..., :6]), rtol=1e-10, atol=1e-10)
+    if pypose_ambient_grad_enabled():
+        J_ref = _localize_pose_blocks_se3(_flatten_jac(J_dense), nodes0.tensor())
+    else:
+        J_ref = _flatten_jac(J_dense[..., :6])
+    torch.testing.assert_close(J_sparse.to_dense(), J_ref, rtol=1e-10, atol=1e-10)
