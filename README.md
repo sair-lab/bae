@@ -209,11 +209,11 @@ This command invokes `prepare_bae(...)` inside `vggt/demo_colmap.py`, which wrap
 If you use `bae` in your research, please cite:
 
 ```bibtex
-@article{zhan2025bundle,
+@article{zhan2026bundle,
   title = {Bundle Adjustment in the Eager Mode},
   author = {Zhan, Zitong and Xu, Huan and Fang, Zihang and Wei, Xinpeng and Hu, Yaoyu and Wang, Chen},
-  journal = {arXiv preprint arXiv:2409.12190},
-  year = {2024},
+  journal={IEEE Transactions on Robotics},
+  year = {2026},
   url = {https://arxiv.org/abs/2409.12190}
 }
 ```
