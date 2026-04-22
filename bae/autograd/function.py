@@ -147,6 +147,14 @@ class TrackingTensor(torch.Tensor):
             return torch.tensor(index)
         elif isinstance(index, np.ndarray):
             return torch.from_numpy(index)
+
+    def __format__(self, format_spec):
+        tensor = self.tensor()
+        if tensor.numel() == 1:
+            return format(tensor.detach().item(), format_spec)
+        if format_spec:
+            return format(str(tensor), format_spec)
+        return str(tensor)
         
     def tensor(self) -> torch.Tensor:
         return torch.Tensor.as_subclass(self, torch.Tensor)
