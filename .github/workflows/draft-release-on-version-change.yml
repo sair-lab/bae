@@ -96,15 +96,13 @@ jobs:
             const body = `Automated draft release for version ${version}.`;
 
             let existing;
-            for (let page = 1; page <= 10 && !existing; page++) {
-              const { data } = await github.rest.repos.listReleases({
+            for await (const response of github.paginate.iterator(github.rest.repos.listReleases, {
                 owner,
                 repo,
                 per_page: 100,
-                page,
-              });
-              if (!data.length) break;
-              existing = data.find((release) => release.tag_name === tag);
+              })) {
+              existing = response.data.find((release) => release.tag_name === tag);
+              if (existing) break;
             }
 
             if (existing) {
