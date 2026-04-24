@@ -1,0 +1,130 @@
+name: draft-release-on-version-change
+
+on:
+  push:
+    paths:
+      - setup.py
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  draft_release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Extract current version
+        id: current
+        run: |
+          python - <<'PY'
+          import re
+          from pathlib import Path
+
+          text = Path('setup.py').read_text(encoding='utf-8')
+          m = re.search(r'^VERSION\s*=\s*["\']([^"\']+)["\']', text, re.MULTILINE)
+          if not m:
+              raise SystemExit('Could not find VERSION in setup.py')
+          with open('/tmp/current_version.txt', 'w', encoding='utf-8') as f:
+              f.write(m.group(1))
+          PY
+          echo "value=$(cat /tmp/current_version.txt)" >> "$GITHUB_OUTPUT"
+
+      - name: Extract previous version
+        id: previous
+        run: |
+          before_sha="${{ github.event.before }}"
+
+          if [ -z "$before_sha" ] || [ "$before_sha" = "0000000000000000000000000000000000000000" ]; then
+            echo "value=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if ! git cat-file -e "$before_sha^{commit}" 2>/dev/null; then
+            echo "value=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if ! git show "$before_sha:setup.py" > /tmp/previous_setup.py 2>/dev/null; then
+            echo "value=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          python - <<'PY'
+          import re
+          from pathlib import Path
+
+          text = Path('/tmp/previous_setup.py').read_text(encoding='utf-8')
+          m = re.search(r'^VERSION\s*=\s*["\']([^"\']+)["\']', text, re.MULTILINE)
+          value = m.group(1) if m else ''
+          with open('/tmp/previous_version.txt', 'w', encoding='utf-8') as f:
+              f.write(value)
+          PY
+
+          echo "value=$(cat /tmp/previous_version.txt)" >> "$GITHUB_OUTPUT"
+
+      - name: Decide whether version changed
+        id: changed
+        run: |
+          current='${{ steps.current.outputs.value }}'
+          previous='${{ steps.previous.outputs.value }}'
+
+          if [ -n "$previous" ] && [ "$current" != "$previous" ]; then
+            echo "value=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create or update draft release
+        if: steps.changed.outputs.value == 'true'
+        uses: actions/github-script@v7
+        env:
+          VERSION: ${{ steps.current.outputs.value }}
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const version = process.env.VERSION;
+            const tag = `v${version}`;
+            const name = `v${version}`;
+            const body = `Automated draft release for version ${version}.`;
+
+            let existing = null;
+            try {
+              const res = await github.rest.repos.getReleaseByTag({ owner, repo, tag });
+              existing = res.data;
+            } catch (error) {
+              if (error.status !== 404) throw error;
+            }
+
+            if (existing) {
+              await github.rest.repos.updateRelease({
+                owner,
+                repo,
+                release_id: existing.id,
+                tag_name: tag,
+                name,
+                body,
+                draft: true,
+                prerelease: false,
+              });
+              core.info(`Updated existing draft release for ${tag}`);
+            } else {
+              await github.rest.repos.createRelease({
+                owner,
+                repo,
+                tag_name: tag,
+                target_commitish: context.sha,
+                name,
+                body,
+                draft: true,
+                prerelease: false,
+              });
+              core.info(`Created new draft release for ${tag}`);
+            }
