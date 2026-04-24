@@ -4,6 +4,7 @@ on:
   push:
     paths:
       - setup.py
+  workflow_dispatch:
 
 permissions:
   contents: write
