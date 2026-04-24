@@ -11,7 +11,6 @@ permissions:
 
 jobs:
   draft_release:
-    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
     runs-on: ubuntu-latest
 
     steps:
@@ -96,12 +95,13 @@ jobs:
             const name = `v${version}`;
             const body = `Automated draft release for version ${version}.`;
 
-            const releases = await github.paginate(github.rest.repos.listReleases, {
-              owner,
-              repo,
-              per_page: 100,
-            });
-            const existing = releases.find((release) => release.tag_name === tag) || null;
+            let existing = null;
+            try {
+              const res = await github.rest.repos.getReleaseByTag({ owner, repo, tag });
+              existing = res.data;
+            } catch (error) {
+              if (error.status !== 404) throw error;
+            }
 
             if (existing) {
               await github.rest.repos.updateRelease({
@@ -120,6 +120,7 @@ jobs:
                 owner,
                 repo,
                 tag_name: tag,
+                target_commitish: context.sha,
                 name,
                 body,
                 draft: true,
