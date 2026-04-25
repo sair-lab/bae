@@ -11,9 +11,10 @@
 
 	"mounts": [
 		"source=${localEnv:HOME}/.codex,target=/root/.codex,type=bind",
+		"source=${localEnv:HOME}/.gitconfig,target=/root/.gitconfig,type=bind"
 	],
 	"features": {
-		"ghcr.io/jsburckhardt/devcontainer-features/codex:1": {}
+		"ghcr.io/devcontainers/features/node:1": {}
 	},
 
 	// Features to add to the dev container. More info: https://containers.dev/features.
@@ -22,8 +23,7 @@
 	// Use 'forwardPorts' to make a list of ports inside the container available locally.
 	// "forwardPorts": [],
 
-	// Uncomment the next line to run commands after the container is created.
-	// "postCreateCommand": "cat /etc/os-release",
+	"postCreateCommand": ". ${NVM_DIR}/nvm.sh && nvm install --lts && npm install -g @openai/codex oh-my-codex",
 
 	// Configure tool-specific properties.
 	// "customizations": {},
