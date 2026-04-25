@@ -37,6 +37,13 @@ def _relative_se3_residual(poses: pp.LieTensor, node1: pp.LieTensor, node2: pp.L
     return (poses.Inv() @ node1.Inv() @ node2).Log().tensor()
 
 
+@map_transform
+def _cat_inside_map(points: torch.Tensor, scale: torch.Tensor) -> torch.Tensor:
+    u = points[..., :1] * scale[..., :1]
+    v = points[..., 1:2] * scale[..., 1:2]
+    return torch.cat((u, v), dim=-1)
+
+
 @pytest.mark.parametrize("device", ["cpu", "cuda"])
 def test_sparse_jacobian_matches_torch_jacrev(device: str):
     if device == "cuda" and not torch.cuda.is_available():
@@ -106,6 +113,56 @@ def test_sparse_jacobian_last_op_indexing_is_identity(device: str):
     (JA,) = jacrev(f, argnums=(0,))(A0)
     torch.testing.assert_close(J_sparse.to_dense(), _flatten_jac(JA), rtol=1e-10, atol=1e-10)
     assert torch.equal(J_sparse.col_indices(), idx_a)
+
+
+class MapCatResidual(nn.Module):
+    def __init__(self, points: torch.Tensor):
+        super().__init__()
+        self.points = nn.Parameter(Track(points))
+
+    def forward(
+        self,
+        obs: torch.Tensor,
+        idx: torch.Tensor,
+        scale: torch.Tensor,
+    ) -> torch.Tensor:
+        return _cat_inside_map(self.points[idx], scale) - obs
+
+
+@pytest.mark.parametrize("device", ["cpu", "cuda"])
+def test_sparse_jacobian_map_transform_treats_inner_cat_as_opaque(device: str):
+    if device == "cuda" and not torch.cuda.is_available():
+        pytest.skip("CUDA not available")
+
+    torch.manual_seed(0)
+    dtype = torch.float64
+
+    num_points = 6
+    n = 8
+    dim = 3
+
+    points0 = torch.randn(num_points, dim, device=device, dtype=dtype)
+    idx = torch.randint(0, num_points, (n,), device=device, dtype=torch.int32)
+    scale = torch.rand(n, 2, device=device, dtype=dtype) + 0.5
+    obs = torch.randn(n, 2, device=device, dtype=dtype)
+
+    model = MapCatResidual(points0)
+    out = model(obs, idx, scale)
+
+    (J_sparse,) = sparse_jacobian(out, [model.points])
+
+    def f(points: torch.Tensor) -> torch.Tensor:
+        return torch.cat(
+            (
+                points[idx, :1] * scale[..., :1],
+                points[idx, 1:2] * scale[..., 1:2],
+            ),
+            dim=-1,
+        ) - obs
+
+    (J_points,) = jacrev(f, argnums=(0,))(points0)
+    torch.testing.assert_close(J_sparse.to_dense(), _flatten_jac(J_points), rtol=1e-10, atol=1e-10)
+    assert torch.equal(J_sparse.col_indices(), idx)
 
 
 class CatResidual(nn.Module):

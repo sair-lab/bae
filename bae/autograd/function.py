@@ -1,6 +1,7 @@
 import torch
 import numpy as np
 import pypose as pp
+from functools import wraps
 
 WHITELISTED_MAPS = tuple(
     func for func in (
@@ -26,6 +27,9 @@ _LTYPE_PRESERVING_FUNCS = {
 def _iter_tracked_tensors(values):
     if isinstance(values, torch.Tensor):
         yield values
+    elif isinstance(values, dict):
+        for value in values.values():
+            yield from _iter_tracked_tensors(value)
     elif isinstance(values, (tuple, list)):
         for value in values:
             yield from _iter_tracked_tensors(value)
@@ -67,6 +71,34 @@ def _find_tracking_source(values, cls):
     return None
 
 
+def _unwrap_tracking_tensor(value):
+    if not isinstance(value, TrackingTensor):
+        return value
+    if isinstance(value, pp.LieTensor):
+        unwrapped = torch.Tensor.as_subclass(value, pp.LieTensor)
+        unwrapped.ltype = value.ltype
+        return unwrapped
+    return torch.Tensor.as_subclass(value, torch.Tensor)
+
+
+def _unwrap_tracking_tensors(values):
+    if isinstance(values, TrackingTensor):
+        return _unwrap_tracking_tensor(values)
+    if isinstance(values, dict):
+        return {key: _unwrap_tracking_tensors(value) for key, value in values.items()}
+    if isinstance(values, tuple):
+        return tuple(_unwrap_tracking_tensors(value) for value in values)
+    if isinstance(values, list):
+        return [_unwrap_tracking_tensors(value) for value in values]
+    return values
+
+
+def _rewrap_tracking_tensor(result, tracking_source):
+    if tracking_source is None or not isinstance(result, torch.Tensor) or isinstance(result, TrackingTensor):
+        return result
+    return TrackingTensor(result)
+
+
 def _retain_ltype(result, tracking_source, cls, func):
     if tracking_source is None or not issubclass(cls, pp.LieTensor):
         return result
@@ -101,9 +133,11 @@ class TrackingTensor(torch.Tensor):
         if kwargs is None:
             kwargs = {}
         result = super(TrackingTensor, cls).__torch_function__(func, types, args=args, kwargs=kwargs)
-        result = _retain_ltype(result, _find_tracking_source(args, cls), cls, func)
+        trace_inputs = (args, kwargs)
+        tracking_source = _find_tracking_source(trace_inputs, cls)
+        result = _retain_ltype(result, tracking_source, cls, func)
 
-        if isinstance(result, torch.Tensor) and (not args or getattr(args[0], '_active', True)):
+        if isinstance(result, torch.Tensor):
             if (func == torch._C.TensorBase.__getitem__) and isinstance(args[1], torch.Tensor):
                 result = _attach_index_trace(result, args[1], args[0])
             elif func == torch.cat:
@@ -128,11 +162,6 @@ class TrackingTensor(torch.Tensor):
         #     else:
         #         index = (self._convert_to_index_tensor(index[0]), *index[1:])
         result = super().__getitem__(index)
-        # if getattr(self, '_active', True):
-        #     print(f"__getitem__ called with index {index}")
-        #     if isinstance(index, torch.Tensor):
-        #         index_edge = ("index", index, self)
-        #         result.optrace[id(result)] = index_edge
         return result
 
     def _convert_to_index_tensor(self, index):
@@ -212,15 +241,19 @@ def index_transform(tensor, index):
 # =============================================================================
 # Decorator: map_transform
 # A decorator that wraps a function to apply a map transformation.
-# It unsqueezes tensor arguments, calls the function, then squeezes the result.
-# Additionally, it merges metadata from all input tensors.
+# It runs the function on unwrapped tensors so inner operations stay opaque,
+# then reattaches a single map edge to the result.
 # =============================================================================
 def map_transform(func):
+    @wraps(func)
     def wrapper(*args, **kwargs):
-        result = func(*args, **kwargs)
+        tracking_source = _find_tracking_source((args, kwargs), TrackingTensor)
+        result = func(*_unwrap_tracking_tensors(args), **_unwrap_tracking_tensors(kwargs))
         # map edge (edge_type, func, [input_args])
         # ensure final result is an IndexTrackingTensor
-        return _attach_map_trace(result, func, args)
+        result = _rewrap_tracking_tensor(result, tracking_source)
+        result = _attach_map_trace(result, func, args)
+        return result
     return wrapper
 
     # map_transform(vmap(func))
