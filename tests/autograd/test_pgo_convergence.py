@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import os
 from pathlib import Path
 import sys
 from time import perf_counter
@@ -10,6 +11,9 @@ import warnings
 import pypose as pp
 import pytest
 import torch
+
+# The PGO reference costs were calibrated with ambient Lie gradients.
+os.environ.setdefault("BAE_USE_PYPOSE_AMBIENT_GRAD", "1")
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(_REPO_ROOT) not in sys.path:
@@ -52,8 +56,8 @@ def _run_pgo_final_cost_fixed_first(sample_name: str) -> tuple[float, float]:
 
     device = torch.device("cuda")
     data = G2OPGO(str(_PGO_DATA_DIR), sample_name, device=str(device), download=False)
-    nodes = data.nodes.tensor() if isinstance(data.nodes, pp.LieTensor) else data.nodes
-    poses = data.poses.tensor() if isinstance(data.poses, pp.LieTensor) else data.poses
+    nodes = data.nodes
+    poses = data.poses
 
     nodes = nodes.to(dtype=_DTYPE)
     poses = poses.to(dtype=_DTYPE)
