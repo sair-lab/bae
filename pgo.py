@@ -14,7 +14,6 @@ from bae.optim import LM
 
 OPTIMIZE_INTRINSICS = False
 USE_QUATERNIONS=True
-DTYPE = torch.float64
 DTYPE_CHOICES = {
     'float64': torch.float64,
     'fp64': torch.float64,
@@ -77,7 +76,7 @@ def _pose_graph_residual(poses, node1, node2, infos):
 
 
 @map_transform
-def _tracked_pose_graph_residual(poses, node1, node2, infos):
+def pose_graph_residual(poses, node1, node2, infos):
     return _pose_graph_residual(poses, node1, node2, infos)
 
 class PoseGraph(nn.Module):
@@ -89,7 +88,7 @@ class PoseGraph(nn.Module):
     def forward(self, edges, poses, infos):
         node1 = self.nodes[edges[..., 0]]
         node2 = self.nodes[edges[..., 1]]
-        return _tracked_pose_graph_residual(poses, node1, node2, infos)
+        return pose_graph_residual(poses, node1, node2, infos)
 
 
 class PoseGraphFixedFirst(nn.Module):
@@ -104,7 +103,7 @@ class PoseGraphFixedFirst(nn.Module):
         nodes = self.nodes_all(node_fixed)
         node1 = nodes[edges[..., 0]]
         node2 = nodes[edges[..., 1]]
-        return _tracked_pose_graph_residual(poses, node1, node2, infos)
+        return pose_graph_residual(poses, node1, node2, infos)
 
 
 if __name__ == '__main__':
@@ -169,7 +168,6 @@ if __name__ == '__main__':
         nodes_current = graph.nodes
 
     sample_prefix = os.path.join(args.save, os.path.splitext(args.dataname)[0])
-    nodes_current = nodes_current if isinstance(nodes_current, pp.LieTensor) else pp.SE3(nodes_current)
     plot_and_save(nodes_current.translation(), sample_prefix + '.png', args.dataname)
 
     gif_frames = []
@@ -194,7 +192,6 @@ if __name__ == '__main__':
                 nodes_current = graph.nodes_all(input['node_fixed'])
             else:
                 nodes_current = graph.nodes
-            nodes_current = nodes_current if isinstance(nodes_current, pp.LieTensor) else pp.SE3(nodes_current)
             frame, _ = render_frame(nodes_current.translation(), title)
             gif_frames.append(frame)
     if args.device == 'cuda':
@@ -209,10 +206,9 @@ if __name__ == '__main__':
         nodes_current = graph.nodes_all(input['node_fixed'])
     else:
         nodes_current = graph.nodes
-    nodes_current = nodes_current if isinstance(nodes_current, pp.LieTensor) else pp.SE3(nodes_current)
     plot_and_save(nodes_current.translation(), name+'.png', title)
     torch.save(graph.state_dict(), name+'.pt')
-    write_ceres_txt(nodes_current.tensor() if isinstance(nodes_current, pp.LieTensor) else nodes_current, name+'.txt')
+    write_ceres_txt(nodes_current.tensor(), name+'.txt')
     if args.gif:
         save_gif(gif_frames, sample_prefix + '.gif', duration=args.gif_duration)
 
