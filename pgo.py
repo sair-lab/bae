@@ -1,4 +1,6 @@
 import os
+os.environ.setdefault('BAE_USE_PYPOSE_AMBIENT_GRAD', '1')
+
 import time
 import torch
 import argparse
