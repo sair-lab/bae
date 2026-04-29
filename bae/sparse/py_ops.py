@@ -114,7 +114,6 @@ def diagonal_op_(input, offset: int=0, op: Optional[Callable]=None):
 
     #simple case(block is square and offset is 0)
     if dm == dn and offset == 0:
-        indices = None
         if not USE_TRITON:
             dummy_val = torch.zeros(bsr_values.shape[0], device='cpu')
             dummy = torch.sparse_csr_tensor(crow_indices=crow_indices.to('cpu'),
@@ -135,35 +134,17 @@ def diagonal_op_(input, offset: int=0, op: Optional[Callable]=None):
         n_diag_blocks = sm if sm < sn else sn
         if diag_indices.shape[-1] == n_diag_blocks:
             results = values
-            diag_rows = None
         else:
-            # Triton path only computes a mask over existing entries. If some diagonal
-            # blocks are structurally missing, we need row indices to scatter into a
-            # dense diagonal buffer.
-            if indices is None:
-                dummy_val = torch.zeros(bsr_values.shape[0], device='cpu')
-                dummy = torch.sparse_csr_tensor(crow_indices=crow_indices.to('cpu'),
-                                                col_indices=col_indices.to('cpu'),
-                                                values=dummy_val)
-                indices = dummy.to_sparse(layout=torch.sparse_coo).coalesce().indices().to(input.device)
             results_shape = (n_diag_blocks, dm)
             results = torch.zeros(results_shape, dtype=values.dtype, device=values.device)
-            diag_rows = indices[0, diag_indices]
-            if values.ndim == 1:
-                results[diag_rows, 0] = values
-            else:
-                results[diag_rows] = values
+            results[indices[0, diag_indices]] = values
+            assert op is None, "op is not supported for diagonal that has empty values."
         if bsr_values.ndim > 1:
             results = torch.flatten(results, start_dim=-2, end_dim=-1)
         # apply the inplace op
         if op is not None:
             results = op(results)
-            if diag_rows is None:
-                block_diags[diag_indices] = results.view(n_diag_blocks, dm) if bsr_values.ndim > 1 else results
-            else:
-                if diag_indices.numel() > 0:
-                    dense_results = results.view(n_diag_blocks, dm) if bsr_values.ndim > 1 else results
-                    block_diags[diag_indices] = dense_results[diag_rows]
+            block_diags[diag_indices] = results.view(n_diag_blocks, dm) if bsr_values.ndim > 1 else results
         return results
     else:
         raise NotImplementedError('Only square block and offset 0 is supported.')
@@ -250,3 +231,4 @@ with warnings.catch_warnings():
     sparse_lib = Library('aten', 'IMPL')
     sparse_lib.impl('diagonal', diagonal_op_, 'SparseCsrCPU')
     sparse_lib.impl('diagonal', diagonal_op_, 'SparseCsrCUDA')
+
