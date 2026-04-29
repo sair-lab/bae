@@ -35,14 +35,6 @@ def _iter_tracked_tensors(values):
             yield from _iter_tracked_tensors(value)
 
 
-def _merge_optrace(values):
-    merged_optrace = {}
-    for value in _iter_tracked_tensors(values):
-        if hasattr(value, 'optrace'):
-            merged_optrace.update(value.optrace)
-    return merged_optrace
-
-
 def _attach_index_trace(result, index, tensor):
     if not hasattr(result, 'optrace'):
         result.optrace = {}
@@ -51,16 +43,19 @@ def _attach_index_trace(result, index, tensor):
 
 
 def _attach_cat_trace(result, tensors, dim):
-    merged_optrace = _merge_optrace(tensors)
-    merged_optrace[id(result)] = ("cat", dim, tuple(tensors))
-    result.optrace = merged_optrace
+    tracked = []
+    offset = 0
+    for t in tensors:
+        n = t.shape[0]
+        if hasattr(t, 'optrace') or isinstance(t, torch.nn.Parameter):
+            tracked.append((offset, offset + n, t))
+        offset += n
+    result.optrace = {id(result): ("cat", dim, tuple(tracked))}
     return result
 
 
 def _attach_map_trace(result, func, args):
-    merged_optrace = _merge_optrace(args)
-    merged_optrace[id(result)] = ("map", func, args)
-    result.optrace = merged_optrace
+    result.optrace = {id(result): ("map", func, args)}
     return result
 
 

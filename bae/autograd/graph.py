@@ -136,8 +136,8 @@ def _clear_jactrace(output, params):
             if isinstance(arg, torch.Tensor):
                 stack.append(arg)
         elif op == 'cat':
-            args = tensor.optrace[id(tensor)][2]
-            stack.extend(arg for arg in args if isinstance(arg, torch.Tensor))
+            tracked = tensor.optrace[id(tensor)][2]  # ((start, end, arg), ...)
+            stack.extend(item[2] for item in tracked if isinstance(item[2], torch.Tensor))
 
 
 def amend_trace(arg, jac_trace: tuple):
@@ -270,7 +270,7 @@ def backward(output_, is_root=False):
 
     elif output_.optrace[id(output_)][0] == 'cat':
         dim = output_.optrace[id(output_)][1]
-        args = output_.optrace[id(output_)][2]
+        tracked = output_.optrace[id(output_)][2]  # ((start, end, arg), ...)
         if dim != 0:
             raise NotImplementedError("Only torch.cat(..., dim=0) is supported")
 
@@ -286,17 +286,8 @@ def backward(output_, is_root=False):
             output_.jactrace = (None, eye_blocks)
 
         upstream = output_.jactrace
-        offset = 0
-        for arg in args:
+        for start, end, arg in tracked:
             n = arg.shape[0]
-            start, end = offset, offset + n
-
-            # Fixed/non-optimizable tensors (e.g., gauge-fixed first pose) do
-            # not need Jacobian traces.
-            if not (hasattr(arg, 'optrace') or isinstance(arg, torch.nn.Parameter)):
-                offset = end
-                continue
-
             if type(upstream) is tuple:
                 jac_trace = _slice_upstream_tuple_columns(
                     upstream[0], upstream[1], start, end, out_cols_blocks=n
@@ -311,7 +302,6 @@ def backward(output_, is_root=False):
             amend_trace(arg, jac_trace)
             if isinstance(arg, torch.Tensor) and hasattr(arg, 'optrace'):
                 backward(arg, is_root=False)
-            offset = end
 
         if hasattr(output_, 'jactrace'):
             delattr(output_, 'jactrace')
