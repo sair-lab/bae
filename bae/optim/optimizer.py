@@ -32,10 +32,7 @@ class LM(ppLM):
             self.reject_count = 0
             J_T = J_T.to_sparse_csr()
             J = J.to_sparse_csr()
-            if J.dtype == torch.float64:
-                A = self.mm(J_T, J)
-            else:
-                A = J_T @ J
+            A = self.mm(J_T, J)
 
             diagonal_op_(A, op=partial(torch.clamp_, min=pg['min'], max=pg['max']))
 
