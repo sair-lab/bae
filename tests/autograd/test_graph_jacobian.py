@@ -10,7 +10,7 @@ os.environ.setdefault("BAE_USE_PYPOSE_AMBIENT_GRAD", "1")
 
 from bae.autograd.function import TrackingTensor as Track, map_transform
 from bae.autograd.graph import jacobian as sparse_jacobian
-from bae.utils.ceres_pose import se3_pose_plus_jacobian_xyzw
+from bae.utils.retraction_jacobian import se3_retraction_jacobian
 from bae.utils.pypose_ambient_grad import (
     install_pypose_ambient_grad_monkeypatch,
     pypose_ambient_grad_enabled,
@@ -47,7 +47,7 @@ def _flatten_jac(J: torch.Tensor) -> torch.Tensor:
 
 def _localize_pose_blocks_se3(jac_dense: torch.Tensor, nodes: torch.Tensor) -> torch.Tensor:
     jac_dense = jac_dense.reshape(jac_dense.shape[0], nodes.shape[0], 7)
-    plus = se3_pose_plus_jacobian_xyzw(nodes)
+    plus = se3_retraction_jacobian(nodes)
     return torch.einsum("bni,nij->bnj", jac_dense, plus).reshape(jac_dense.shape[0], nodes.shape[0] * 6)
 
 

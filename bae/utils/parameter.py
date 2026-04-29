@@ -1,7 +1,7 @@
 import pypose as pp
 import torch
 
-from .ceres_pose import quaternion_plus_jacobian_xyzw, se3_pose_plus_jacobian_xyzw
+from .retraction_jacobian import so3_retraction_jacobian, se3_retraction_jacobian
 from .pypose_ambient_grad import pypose_ambient_grad_enabled
 
 
@@ -26,7 +26,7 @@ def trim_parameter_jacobian_values(
         pose = param[..., :7].detach()
         if block_indices is not None:
             pose = pose[block_indices.to(torch.long)]
-        pose_values = values[..., :7] @ se3_pose_plus_jacobian_xyzw(pose)
+        pose_values = values[..., :7] @ se3_retraction_jacobian(pose)
         if param.shape[-1] == 7:
             return pose_values
         return torch.cat([pose_values, values[..., 7:]], dim=-1)
@@ -36,9 +36,9 @@ def trim_parameter_jacobian_values(
             if block_indices is not None:
                 lie_param = lie_param[block_indices.to(torch.long)]
             if param.ltype == pp.SO3_type:
-                return values @ quaternion_plus_jacobian_xyzw(lie_param)
+                return values @ so3_retraction_jacobian(lie_param)
             if param.ltype == pp.SE3_type:
-                return values @ se3_pose_plus_jacobian_xyzw(lie_param)
+                return values @ se3_retraction_jacobian(lie_param)
         step_dim = int(param.ltype.manifold[0])
         if step_dim != param.shape[-1]:
             return values[..., :step_dim]

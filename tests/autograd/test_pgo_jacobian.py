@@ -16,7 +16,7 @@ if str(_REPO_ROOT) not in sys.path:
 os.environ.setdefault("BAE_USE_PYPOSE_AMBIENT_GRAD", "1")
 
 from bae.autograd.graph import jacobian as sparse_jacobian  # noqa: E402
-from bae.utils.ceres_pose import se3_pose_plus_jacobian_xyzw  # noqa: E402
+from bae.utils.retraction_jacobian import se3_retraction_jacobian  # noqa: E402
 from bae.utils.pgo_dataset import G2OPGO  # noqa: E402
 from pgo import PoseGraph, PoseGraphFixedFirst, _pose_graph_residual  # noqa: E402
 
@@ -48,7 +48,7 @@ def _flatten_jac(jac: torch.Tensor) -> torch.Tensor:
 
 def _localize_pose_blocks_se3(jac_dense: torch.Tensor, nodes: torch.Tensor) -> torch.Tensor:
     jac_dense = jac_dense.reshape(jac_dense.shape[0], nodes.shape[0], 7)
-    plus = se3_pose_plus_jacobian_xyzw(nodes)
+    plus = se3_retraction_jacobian(nodes)
     return torch.einsum("bni,nij->bnj", jac_dense, plus).reshape(jac_dense.shape[0], nodes.shape[0] * 6)
 
 
@@ -102,7 +102,7 @@ def test_se3_pose_plus_jacobian_matches_finite_difference():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     dtype = torch.float64
     pose = pp.randn_SE3(sigma=0.2, device=device).to(dtype=dtype)
-    plus = se3_pose_plus_jacobian_xyzw(pose.tensor())
+    plus = se3_retraction_jacobian(pose.tensor())
 
     eps = 1e-7
     fd = torch.zeros_like(plus)
