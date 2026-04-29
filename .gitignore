@@ -14,3 +14,4 @@ task.md
 .DS_Store
 tmp/*
 examples/module/pgo/data/*
+pypose_clone/

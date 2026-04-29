@@ -3,14 +3,18 @@
 </picture>
 
 <p align="center">
+  <a>Accepted to <b>IEEE Transactions on Robotics (T-RO)</b>, 2026</a>
+</p>
+
+<p align="center">
   <a href="https://github.com/zitongzhan">Zitong Zhan</a>, <a href="https://www.linkedin.com/in/huan-xu-999700169/?locale=en_US">Huan Xu</a>, Zihang Fang, <a href="https://www.linkedin.com/in/william-xp-wei/">Xinpeng Wei</a>, <a href="https://theairlab.org/team/yaoyuh/">Yaoyu Hu</a>, and <a href="https://sairlab.org">Chen Wang</a>
 </p>
 
 <p align="center">
-  <a href="https://sairlab.org/bae/">🌐 Project Page</a> | <a href="https://arxiv.org/abs/2409.12190">📄 PDF</a>
+  <a href="https://pypose.org/bae/">🌐 Project Page</a> | <a href="https://arxiv.org/abs/2409.12190">📄 PDF</a>
 </p>
 
-> **⚠️ Development Phase Notice**: This library is currently in active development. APIs are subject to change and should be considered experimental. Use at your own discretion in production environments.
+> **⚠️ User Notice**: `bae` has been integrated with [PyPose](https://github.com/pypose/pypose) and is available from [v0.9.5](https://pypi.org/project/pypose/) or higher. Please refer to [this example](https://github.com/pypose/pypose/tree/main/examples/module/ba) and docs of [psjac](https://pypose.org/docs/main/generated/pypose.autograd.function.parallel_for_sparse_jacobian/#pypose.autograd.function.parallel_for_sparse_jacobian) and [LM](https://pypose.org/docs/main/generated/pypose.optim.LevenbergMarquardt/#pypose.optim.LevenbergMarquardt).
 
 `bae` is a PyTorch-based library supporting **exact** 2nd-order optimization techniques. The library provides efficient implementations for sparse optimization problems in robotics, particularly Bundle Adjustment (BA) and Pose Graph Optimization (PGO).
 
@@ -80,6 +84,7 @@
 
 ### Future Plan
 - [ ] Add Apple Silicon GPU support, [PyTorch PR WIP](https://github.com/pytorch/pytorch/pull/177757)
+- [ ] Schur complement
 - [ ] Reduce runtime overhead using CUDA graph
 - [ ] Distributed Tensor (DTensor) support
 - [ ] An new backend for [distributed solver](https://github.com/NVIDIA/AMGX)
@@ -195,25 +200,16 @@ python demo_colmap.py --scene_dir /path/to/scene --use_ba --implementation bae  
 
 This command invokes `prepare_bae(...)` inside `vggt/demo_colmap.py`, which wraps VGGT tracks and predictions into `bae.optim.LM` and updates `extrinsic`, `intrinsic`, and `points_3d` in place before writing `scene_dir/sparse/` in COLMAP format.
 
-## Performance
-
-`bae` is designed for high performance using:
-
-- Efficient sparse block matrix operations
-- CUDA acceleration for core operations
-- Optimized linear solvers (PCG, CUDA Sparse Solver)
-- Memory-efficient data structures
-
 ## Citation
 
 If you use `bae` in your research, please cite:
 
 ```bibtex
-@article{zhan2025bundle,
+@article{zhan2026bundle,
   title = {Bundle Adjustment in the Eager Mode},
   author = {Zhan, Zitong and Xu, Huan and Fang, Zihang and Wei, Xinpeng and Hu, Yaoyu and Wang, Chen},
-  journal = {arXiv preprint arXiv:2409.12190},
-  year = {2024},
+  journal = {IEEE Transactions on Robotics},
+  year = {2026},
   url = {https://arxiv.org/abs/2409.12190}
 }
 ```

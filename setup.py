@@ -2,7 +2,7 @@ import os
 from setuptools import setup, find_packages
 from torch.utils.cpp_extension import CppExtension, CUDAExtension, BuildExtension
 
-VERSION = "0.2"
+VERSION = "0.2.1"
 
 def readme():
     """Read the README.md file for long description"""
