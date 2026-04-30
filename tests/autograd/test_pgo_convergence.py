@@ -50,12 +50,8 @@ _PGO_CERES_TOTAL_RUNTIMES_S: dict[str, float] = {
 
 
 def _run_pgo_final_cost_fixed_first(sample_name: str) -> tuple[float, float]:
-    sample_path = _PGO_DATA_DIR / sample_name
-    if not sample_path.exists():
-        pytest.skip(f"Missing PGO dataset: {sample_path}")
-
     device = torch.device("cuda")
-    data = G2OPGO(str(_PGO_DATA_DIR), sample_name, device=str(device), download=False)
+    data = G2OPGO(str(_PGO_DATA_DIR), sample_name, device=str(device), download=True)
     nodes = data.nodes
     poses = data.poses
 

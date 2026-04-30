@@ -53,11 +53,7 @@ def _localize_pose_blocks_se3(jac_dense: torch.Tensor, nodes: torch.Tensor) -> t
 
 
 def _load_parking_subset(device: torch.device, dtype: torch.dtype):
-    path = _PARKING_DATAROOT / _PARKING_FILENAME
-    if not path.exists():
-        pytest.skip(f"Missing PGO dataset: {path}")
-
-    data = G2OPGO(str(_PARKING_DATAROOT), _PARKING_FILENAME, device=str(device), download=False)
+    data = G2OPGO(str(_PARKING_DATAROOT), _PARKING_FILENAME, device=str(device), download=True)
     nodes = data.nodes if isinstance(data.nodes, pp.LieTensor) else pp.SE3(data.nodes)
     poses = data.poses if isinstance(data.poses, pp.LieTensor) else pp.SE3(data.poses)
 
