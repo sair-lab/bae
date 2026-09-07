@@ -1,7 +1,6 @@
 from functools import partial
 import torch
 import pytest
-from bae.sparse import bsr, bsr_cuda
 from bae.sparse import diagonal_op_
 from torchvision.transforms import Compose
 
