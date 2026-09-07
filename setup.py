@@ -5,7 +5,7 @@ from importlib.metadata import PackageNotFoundError, version as get_installed_ve
 from packaging.specifiers import SpecifierSet
 from packaging.version import Version
 from setuptools import setup, find_packages
-from torch.utils.cpp_extension import CppExtension, CUDAExtension, BuildExtension
+from torch.utils.cpp_extension import CUDAExtension, BuildExtension
 
 VERSION = "0.2.5"
 SUPPORTED_CUDSS_SPECIFIER = SpecifierSet("<=0.7.1.6")
@@ -107,17 +107,6 @@ if __name__ == '__main__':
 
     # Common extensions
     ext_modules = [
-        CppExtension(
-            'bae.sparse.bsr', 
-            [os.path.join('bae', 'sparse', 'sparse_op_cpp.cpp')]
-        ),
-        CUDAExtension(
-            'bae.sparse.bsr_cuda', 
-            [
-                os.path.join('bae', 'sparse', 'sparse_op_cuda.cpp'),
-                os.path.join('bae', 'sparse', 'sparse_op_cuda_kernel.cu')
-            ]
-        ),
         CUDAExtension(
             'bae.sparse.spgemm', 
             [os.path.join('bae', 'sparse', 'cusparse_wrapper.cpp')]
