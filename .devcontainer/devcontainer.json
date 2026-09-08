@@ -6,40 +6,22 @@
 
 	"mounts": [
 		"source=${localEnv:HOME}/.codex,target=/root/.codex,type=bind",
+		"source=${localEnv:HOME}/.claude,target=/root/.claude,type=bind",
 		"source=${localEnv:HOME}/.gitconfig,target=/root/.gitconfig,type=bind",
 		"source=${localEnv:HOME}/.ssh,target=/tmp/ssh-host,type=bind,readonly"
 	],
-	"features": {
-		"ghcr.io/devcontainers/features/node:1": {}
-	},
-
 	// Features to add to the dev container. More info: https://containers.dev/features.
 	// "features": {},
 
 	// Use 'forwardPorts' to make a list of ports inside the container available locally.
 	// "forwardPorts": [],
 
-	"postCreateCommand": ". ${NVM_DIR}/nvm.sh && nvm install --lts && npm install -g @openai/codex oh-my-codex @anthropic-ai/claude-code opencode-ai && pip install nvidia-cudss-cu12==0.7.1.6 && python -m pip install --no-build-isolation -v -e .",
-	"postStartCommand": "mkdir -p /root/.ssh && cp -r /tmp/ssh-host/. /root/.ssh/ 2>/dev/null || true; chmod 700 /root/.ssh; chmod 600 /root/.ssh/id_* 2>/dev/null || true; chmod 644 /root/.ssh/*.pub 2>/dev/null || true",
+	"postCreateCommand": "curl -fsSL https://chatgpt.com/codex/install.sh | sh && curl -fsSL https://claude.ai/install.sh | bash && pip install nvidia-cudss-cu12==0.7.1.6 && python -m pip install --no-build-isolation -v -e .",
+	"postStartCommand": "mkdir -p /root/.ssh && cp -r /tmp/ssh-host/* /root/.ssh/ 2>/dev/null || true; chmod 700 /root/.ssh; chmod 600 /root/.ssh/id_* 2>/dev/null || true; chmod 644 /root/.ssh/*.pub 2>/dev/null || true",
 
 	// Configure tool-specific properties.
 	// "customizations": {},
 
-	"containerEnv": {
-		"ANTHROPIC_BASE_URL": "https://api.deepseek.com/anthropic",
-		"ANTHROPIC_AUTH_TOKEN": "",
-		"ANTHROPIC_MODEL": "deepseek-v4-pro[1m]",
-		"ANTHROPIC_DEFAULT_OPUS_MODEL": "deepseek-v4-pro[1m]",
-		"ANTHROPIC_DEFAULT_SONNET_MODEL": "deepseek-v4-pro[1m]",
-		"ANTHROPIC_DEFAULT_HAIKU_MODEL": "deepseek-v4-flash",
-		"CLAUDE_CODE_SUBAGENT_MODEL": "deepseek-v4-flash",
-		"CLAUDE_CODE_EFFORT_LEVEL": "max",
-		"CLAUDE_CODE_DISABLE_AUTO_TITLE": "1",
-		"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
-		"CLAUDE_CODE_DISABLE_SESSION_METADATA": "1",
-		"CLAUDE_CODE_DISABLE_QUOTA_CHECK": "1",
-		"IS_SANDBOX": "1"
-	},
 	"runArgs": ["--user=0:0", "--gpus", "all", "--shm-size=8g"],
 	"remoteUser": "root"
 }
