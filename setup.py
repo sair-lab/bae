@@ -8,7 +8,7 @@ from setuptools import setup, find_packages
 from torch.utils.cpp_extension import CUDAExtension, BuildExtension
 
 VERSION = "0.2.5"
-SUPPORTED_CUDSS_SPECIFIER = SpecifierSet("<=0.7.1.6")
+SUPPORTED_CUDSS_SPECIFIER = SpecifierSet("<0.9")
 
 def readme():
     """Read the README.md file for long description"""
