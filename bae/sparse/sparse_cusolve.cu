@@ -10,6 +10,30 @@
 #include <cudss.h>
 
 
+// cuDSS 0.8 introduced its own datatypes and separate CSR offset/index types.
+#if CUDSS_VERSION_MAJOR > 0 || CUDSS_VERSION_MINOR >= 8
+using BaeCudssDataType = cudssDataType_t;
+constexpr auto BAE_CUDSS_R_32F = CUDSS_R_32F;
+constexpr auto BAE_CUDSS_R_64F = CUDSS_R_64F;
+#else
+using BaeCudssDataType = cudaDataType_t;
+constexpr auto BAE_CUDSS_R_32F = CUDA_R_32F;
+constexpr auto BAE_CUDSS_R_64F = CUDA_R_64F;
+#endif
+
+static cudssStatus_t createCsrMatrix(
+    cudssMatrix_t* matrix, int64_t nrows, int64_t ncols, int64_t nnz,
+    int* rowOffsets, int* colIndices, void* values, BaeCudssDataType valueType) {
+    return cudssMatrixCreateCsr(
+        matrix, nrows, ncols, nnz, rowOffsets, nullptr, colIndices, values,
+#if CUDSS_VERSION_MAJOR > 0 || CUDSS_VERSION_MINOR >= 8
+        CUDSS_R_32I, CUDSS_R_32I,
+#else
+        CUDA_R_32I,
+#endif
+        valueType, CUDSS_MTYPE_SPD, CUDSS_MVIEW_FULL, CUDSS_BASE_ZERO);
+}
+
 using namespace std;
 
 static void HandlecusolverError(cusolverStatus_t err, int line) {
@@ -152,16 +176,16 @@ class CuDirectSparseSolver {
                 double* values_ptr = values.data<double>();
                 double* b_ptr = b.data<double>();
                 double* x_ptr = x.data<double>();
-                HANDLE_CUDSS_ERROR(cudssMatrixCreateDn(&b_mt, b.size(0), 1, b.size(0), b_ptr, CUDA_R_64F, CUDSS_LAYOUT_COL_MAJOR));
-                HANDLE_CUDSS_ERROR(cudssMatrixCreateDn(&x_mt, x.size(0), 1, x.size(0), x_ptr, CUDA_R_64F, CUDSS_LAYOUT_COL_MAJOR));
-                HANDLE_CUDSS_ERROR(cudssMatrixCreateCsr(&A_mt, A.size(0), A.size(1),  A._nnz(), rowOffsets, NULL, colIndices, values_ptr, CUDA_R_32I, CUDA_R_64F, CUDSS_MTYPE_SPD, CUDSS_MVIEW_FULL, CUDSS_BASE_ZERO));
+                HANDLE_CUDSS_ERROR(cudssMatrixCreateDn(&b_mt, b.size(0), 1, b.size(0), b_ptr, BAE_CUDSS_R_64F, CUDSS_LAYOUT_COL_MAJOR));
+                HANDLE_CUDSS_ERROR(cudssMatrixCreateDn(&x_mt, x.size(0), 1, x.size(0), x_ptr, BAE_CUDSS_R_64F, CUDSS_LAYOUT_COL_MAJOR));
+                HANDLE_CUDSS_ERROR(createCsrMatrix(&A_mt, A.size(0), A.size(1), A._nnz(), rowOffsets, colIndices, values_ptr, BAE_CUDSS_R_64F));
             } else if (values.type().scalarType() == torch::ScalarType::Float) {
                 float* values_ptr = values.data<float>();
                 float* b_ptr = b.data<float>();
                 float* x_ptr = x.data<float>();
-                HANDLE_CUDSS_ERROR(cudssMatrixCreateDn(&b_mt, b.size(0), 1, b.size(0), b_ptr, CUDA_R_32F, CUDSS_LAYOUT_COL_MAJOR));
-                HANDLE_CUDSS_ERROR(cudssMatrixCreateDn(&x_mt, x.size(0), 1, x.size(0), x_ptr, CUDA_R_32F, CUDSS_LAYOUT_COL_MAJOR));
-                HANDLE_CUDSS_ERROR(cudssMatrixCreateCsr(&A_mt, A.size(0), A.size(1),  A._nnz(), rowOffsets, NULL, colIndices, values_ptr, CUDA_R_32I, CUDA_R_32F, CUDSS_MTYPE_SPD, CUDSS_MVIEW_FULL, CUDSS_BASE_ZERO));
+                HANDLE_CUDSS_ERROR(cudssMatrixCreateDn(&b_mt, b.size(0), 1, b.size(0), b_ptr, BAE_CUDSS_R_32F, CUDSS_LAYOUT_COL_MAJOR));
+                HANDLE_CUDSS_ERROR(cudssMatrixCreateDn(&x_mt, x.size(0), 1, x.size(0), x_ptr, BAE_CUDSS_R_32F, CUDSS_LAYOUT_COL_MAJOR));
+                HANDLE_CUDSS_ERROR(createCsrMatrix(&A_mt, A.size(0), A.size(1), A._nnz(), rowOffsets, colIndices, values_ptr, BAE_CUDSS_R_32F));
                 // https://docs.nvidia.com/cuda/archive/12.9.0/cudss/functions.html#:~:text=the%20dense%20matrix-,NULL%20is%20the%20only%20supported%20value%20as%204%2Darray%20CSR%20is%20not%20supported%20currently,-colIndices
             }
             //---------------------------------------------------------------------------------
@@ -184,17 +208,9 @@ class CuDirectSparseSolver {
         
             HANDLE_CUDSS_ERROR(cudssDataGet(handle, cudss_data, CUDSS_DATA_LU_NNZ, &L_nnz, sizeof(L_nnz), &sizeWritten));
         
-            int64_t A_nrows = 0, A_ncols = 0;
-            int64_t A_nnz = 0;
-            void *A_rowStart = nullptr, *A_rowEnd = nullptr, *A_colIndices = nullptr, *A_values = nullptr;
-            cudaDataType_t A_indexType, A_valueType;
-            cudssMatrixType_t A_mtype;
-            cudssMatrixViewType_t A_mview;
-            cudssIndexBase_t A_indexBase;
-        
-            HANDLE_CUDSS_ERROR(cudssMatrixGetCsr(A_mt, &A_nrows, &A_ncols, &A_nnz, &A_rowStart, &A_rowEnd, &A_colIndices, &A_values, 
-                                    &A_indexType, &A_valueType, &A_mtype, &A_mview, &A_indexBase));
-        
+            // The input tensor already provides nnz; no matrix metadata query is needed.
+            const int64_t A_nnz = A._nnz();
+
             TORCH_CHECK(A_nnz > 0, "Original matrix A has zero or negative nnz.");
         
             double fill_in_factor = static_cast<double>(L_nnz) / static_cast<double>(A_nnz);

@@ -106,13 +106,14 @@ python -m pip install git+https://github.com/pypose/bae.git
 ### Developer Setup Instructions
 
 1. (Optional) Install CUDSS with pip package manager.
+   - cuDSS 0.8.x uses the new datatype API; older releases retain the legacy API at compile time.
    - For CUDA 12.x, install `nvidia-cudss-cu12`. We verified `nvidia-cudss-cu12==0.6.0.5` and `nvidia-cudss-cu12==0.7.1.6` work with `bae`:
    ```bash
-   pip install "nvidia-cudss-cu12<=0.7.1.6"
+   pip install "nvidia-cudss-cu12<0.9"
    ```
-   - For CUDA 13.x, install `nvidia-cudss-cu13<=0.7.1.6`:
+   - For CUDA 13.x, install `nvidia-cudss-cu13<0.9`:
    ```bash
-   pip install "nvidia-cudss-cu13<=0.7.1.6"
+   pip install "nvidia-cudss-cu13<0.9"
    ```
 
 2. Install PyPose:
